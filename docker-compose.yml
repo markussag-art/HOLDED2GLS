@@ -1,0 +1,19 @@
+services:
+  app:
+    build: .
+    ports:
+      - "3000:3000"
+    environment:
+      - DATABASE_URL=file:./dev.db
+      - NEXTAUTH_SECRET=${NEXTAUTH_SECRET:-change-me-in-production}
+      - NEXTAUTH_URL=http://localhost:3000
+      - ENCRYPTION_KEY=${ENCRYPTION_KEY:-0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef}
+      - ADMIN_PASSWORD=${ADMIN_PASSWORD:-admin123}
+    volumes:
+      - app-data:/app/prisma
+      - label-storage:/app/storage/labels
+    restart: unless-stopped
+
+volumes:
+  app-data:
+  label-storage:

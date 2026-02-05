@@ -1,0 +1,23 @@
+node_modules
+.env
+.env.local
+/src/generated/prisma
+
+# Next.js
+.next/
+out/
+
+# Database
+prisma/dev.db
+prisma/dev.db-journal
+
+# Storage
+storage/labels/*.pdf
+
+# OS
+.DS_Store
+Thumbs.db
+
+# IDE
+.vscode/
+.idea/

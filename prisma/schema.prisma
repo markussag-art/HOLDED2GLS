@@ -1,0 +1,140 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "sqlite"
+  url      = env("DATABASE_URL")
+}
+
+model User {
+  id        String   @id @default(cuid())
+  email     String   @unique
+  password  String
+  name      String?
+  role      String   @default("admin")
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  auditLogs AuditLog[]
+}
+
+model Settings {
+  id        String   @id @default("singleton")
+
+  // Holded
+  holdedApiKey       String  @default("")
+  holdedDocType      String  @default("waybill")
+
+  // GLS
+  glsUsername        String  @default("")
+  glsPassword        String  @default("")
+  glsContactId       String  @default("")
+  glsBaseUrl         String  @default("https://shipit-wbm-es01.gls-group.eu:8443/backend/rs")
+  glsDefaultService  String  @default("BusinessParcel")
+
+  // Sender / Shipper details
+  senderName         String  @default("")
+  senderCif          String  @default("")
+  senderAddress      String  @default("")
+  senderCity         String  @default("")
+  senderProvince     String  @default("")
+  senderPostalCode   String  @default("")
+  senderCountry      String  @default("ES")
+  senderCountryCode  String  @default("ES")
+  senderPhone        String  @default("")
+  senderEmail        String  @default("")
+
+  // Auto-sync
+  autoSyncEnabled    Boolean @default(false)
+  autoSyncMinutes    Int     @default(30)
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+}
+
+model Shipment {
+  id               String   @id @default(cuid())
+
+  // Holded reference
+  holdedDocType     String
+  holdedDocId       String
+  holdedDocNumber   String
+  holdedStatusRaw   String   @default("")
+  holdedContactId   String   @default("")
+  holdedSyncedAt    DateTime @default(now())
+
+  // Local status
+  localStatus       String   @default("Pending") // Pending, Labeled, Error, Shipped, Cancelled
+
+  // Recipient
+  recipientName     String   @default("")
+  recipientCompany  String   @default("")
+  recipientPhone    String   @default("")
+  recipientEmail    String   @default("")
+
+  // Shipping address
+  address1          String   @default("")
+  address2          String   @default("")
+  city              String   @default("")
+  province          String   @default("")
+  postcode          String   @default("")
+  country           String   @default("ES")
+  countryCode       String   @default("ES")
+
+  // Shipment details
+  parcelsCount      Int      @default(1)
+  totalWeightKg     Float    @default(0)
+  parcelWeights     String   @default("[]") // JSON array of per-parcel weights
+
+  // Carrier
+  carrier           String   @default("GLS")
+  serviceType       String   @default("BusinessParcel")
+  serviceCode       String   @default("")
+
+  // Tracking & label
+  trackingNumber    String   @default("")
+  labelPdfPath      String   @default("")
+  labelRawResponse  String   @default("") // JSON snapshot of carrier response (secrets redacted)
+
+  // Reference
+  orderReference    String   @default("")
+  customerReference String   @default("")
+  shippingNotes     String   @default("")
+
+  // Financial (from Holded)
+  docTotal          Float    @default(0)
+  docCurrency       String   @default("EUR")
+
+  // Error
+  errorMessage      String   @default("")
+
+  // Timestamps
+  labelGeneratedAt  DateTime?
+  shippedAt         DateTime?
+  cancelledAt       DateTime?
+
+  createdAt         DateTime @default(now())
+  updatedAt         DateTime @updatedAt
+
+  auditLogs AuditLog[]
+
+  @@unique([holdedDocId, holdedDocType])
+  @@index([localStatus])
+  @@index([holdedDocNumber])
+}
+
+model AuditLog {
+  id          String   @id @default(cuid())
+  action      String   // sync, label_generated, label_cancelled, shipped, error
+  details     String   @default("") // JSON
+  userId      String?
+  shipmentId  String?
+  createdAt   DateTime @default(now())
+
+  user     User?     @relation(fields: [userId], references: [id])
+  shipment Shipment? @relation(fields: [shipmentId], references: [id])
+
+  @@index([shipmentId])
+  @@index([action])
+}
