@@ -1,0 +1,52 @@
+generator client {
+  provider = "prisma-client"
+  output   = "../src/generated/prisma"
+}
+
+datasource db {
+  provider = "sqlite"
+}
+
+model Shipment {
+  id                    String   @id @default(cuid())
+  createdAt             DateTime @default(now())
+  updatedAt             DateTime @updatedAt
+
+  // Holded document reference
+  holdedDocType         String   // e.g. "waybill", "salesorder"
+  holdedDocumentId      String
+
+  // Carrier info
+  carrier               String   // "GLS" or "MRW"
+
+  // Tracking info
+  trackingNumber        String?
+  trackingUrl           String?
+
+  // Label data
+  labelData             String?  // base64 or path to stored label
+  labelObsolete         Boolean  @default(false)
+
+  // Holded sync state
+  trackingSyncedAt      DateTime?
+  trackingSyncStatus    String   @default("NOT_SYNCED") // NOT_SYNCED | SYNCED | ERROR
+  trackingSyncError     String?
+  holdedTrackingPayload String?  // JSON snapshot of last payload sent
+
+  // Shipment details
+  recipientName         String?
+  recipientAddress      String?
+  recipientCity         String?
+  recipientPostalCode   String?
+  recipientCountry      String?  @default("ES")
+  weight                Float?
+  packages              Int?     @default(1)
+  reference             String?
+
+  // Concurrency lock
+  lockUntil             DateTime?
+  lockedBy              String?
+
+  @@index([holdedDocumentId])
+  @@index([trackingSyncStatus])
+}
