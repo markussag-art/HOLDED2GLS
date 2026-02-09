@@ -1,6 +1,6 @@
 import { prisma } from "@/lib/prisma";
 import { holded, HoldedApiError } from "@/services/holded";
-import { createGLSShipment } from "@/services/gls";
+import { createGLSShipment, cancelGLSShipment, validateLabelReady } from "@/services/gls";
 import type { HoldedCarrierKey, HoldedTrackingPayload } from "@/types/holded";
 import type { Shipment } from "@/generated/prisma/client";
 
@@ -190,17 +190,31 @@ export async function generateLabel(shipmentId: string): Promise<Shipment> {
       );
     }
 
-    // Create GLS shipment
-    const glsResult = await createGLSShipment({
+    // Validate label-ready requirements
+    const glsRequest = {
       recipientName: shipment.recipientName ?? "",
       recipientAddress: shipment.recipientAddress ?? "",
       recipientCity: shipment.recipientCity ?? "",
       recipientPostalCode: shipment.recipientPostalCode ?? "",
       recipientCountry: shipment.recipientCountry ?? "ES",
-      weight: shipment.weight ?? 1,
-      packages: shipment.packages ?? 1,
-      reference: shipment.reference ?? undefined,
-    });
+      recipientPhone: shipment.recipientPhone ?? undefined,
+      recipientEmail: shipment.recipientEmail ?? undefined,
+      recipientProvince: shipment.recipientProvince ?? undefined,
+      weight: shipment.weight ?? 0,
+      packages: shipment.packages ?? 0,
+      // Append timestamp suffix if label was previously generated (avoid GLS duplicate error)
+      reference: shipment.labelObsolete && shipment.reference
+        ? `${shipment.reference}-R${Date.now().toString(36)}`
+        : shipment.reference ?? undefined,
+    };
+    const validationErrors = validateLabelReady(glsRequest);
+    if (validationErrors.length > 0) {
+      const missingFields = validationErrors.map((e) => e.message).join("; ");
+      throw new Error(`Label not ready: ${missingFields}`);
+    }
+
+    // Create GLS shipment
+    const glsResult = await createGLSShipment(glsRequest);
 
     // Persist tracking info locally and set status to LABELED
     const updated = await prisma.shipment.update({
@@ -242,6 +256,13 @@ export async function deleteTracking(shipmentId: string): Promise<Shipment> {
       throw new Error("Shipment has no tracking number to delete.");
     }
 
+    // Cancel the shipment in GLS first (best-effort)
+    try {
+      await cancelGLSShipment(shipment.trackingNumber);
+    } catch (error) {
+      console.warn("[deleteTracking] GLS cancel failed (continuing):", error);
+    }
+
     // Clear local tracking fields and reset status to PENDING
     await prisma.shipment.update({
       where: { id: shipmentId },
@@ -280,8 +301,15 @@ export async function regenerateLabel(shipmentId: string): Promise<Shipment> {
       where: { id: shipmentId },
     });
 
-    // Step 1: If has existing tracking, clear it in Holded first
+    // Step 1: If has existing tracking, cancel in GLS and clear in Holded
     if (shipment.trackingNumber) {
+      // Cancel the old shipment in GLS first (best-effort)
+      try {
+        await cancelGLSShipment(shipment.trackingNumber);
+      } catch (error) {
+        console.warn("[regenerateLabel] GLS cancel failed (continuing):", error);
+      }
+
       // Clear local tracking
       await prisma.shipment.update({
         where: { id: shipmentId },
@@ -329,9 +357,15 @@ export async function regenerateLabel(shipmentId: string): Promise<Shipment> {
         recipientCity: shipment.recipientCity ?? "",
         recipientPostalCode: shipment.recipientPostalCode ?? "",
         recipientCountry: shipment.recipientCountry ?? "ES",
+        recipientPhone: shipment.recipientPhone ?? undefined,
+        recipientEmail: shipment.recipientEmail ?? undefined,
+        recipientProvince: shipment.recipientProvince ?? undefined,
         weight: shipment.weight ?? 1,
         packages: shipment.packages ?? 1,
-        reference: shipment.reference ?? undefined,
+        // Append timestamp suffix to avoid GLS "Ya existe el albaran" duplicate error
+        reference: shipment.reference
+          ? `${shipment.reference}-R${Date.now().toString(36)}`
+          : undefined,
       });
     } catch (error) {
       const errorMsg = error instanceof Error ? error.message : String(error);

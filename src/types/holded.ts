@@ -82,6 +82,74 @@ export interface HoldedSendDocumentPayload {
   docIds?: string;
 }
 
+// --- Document listing ---
+
+/** Holded document as returned by list/get endpoints */
+export interface HoldedDocument {
+  id: string;
+  docNumber?: string;
+  date?: number; // Unix timestamp
+  dueDate?: number;
+  status?: number;
+  contact?: string; // Contact ID
+  contactName?: string;
+  contactEmail?: string;
+  contactAddress?: string;
+  contactCity?: string;
+  contactCp?: string;
+  contactProvince?: string;
+  contactCountryCode?: string;
+  contactPhone?: string;
+  shippingAddress?: string;
+  shippingPostalCode?: string;
+  shippingCity?: string;
+  shippingProvince?: string;
+  shippingCountry?: string;
+  notes?: string;
+  desc?: string;
+  subtotal?: number;
+  tax?: number;
+  total?: number;
+  products?: HoldedDocumentProduct[];
+  customFields?: { field: string; value: string }[];
+  salesChannelId?: string;
+}
+
+export interface HoldedDocumentProduct {
+  name?: string;
+  desc?: string;
+  sku?: string;
+  price?: number;
+  units?: number;
+  subtotal?: number;
+  weight?: number;
+  productId?: string;
+}
+
+// --- Contact ---
+
+export interface HoldedContactAddress {
+  address?: string | null;
+  city?: string | null;
+  postalCode?: string | null;
+  province?: string | null;
+  country?: string | null;
+  countryCode?: string | null;
+  info?: string | null;
+}
+
+export interface HoldedContact {
+  id: string;
+  name?: string;
+  tradeName?: string | null;
+  email?: string;
+  phone?: string | null;
+  mobile?: string | null;
+  billAddress?: HoldedContactAddress;
+  shippingAddresses?: HoldedContactAddress[];
+  vatnumber?: string;
+}
+
 /** Parameters for completing a shipment in Holded */
 export interface CompleteAndEmailParams {
   docType: HoldedDocType;

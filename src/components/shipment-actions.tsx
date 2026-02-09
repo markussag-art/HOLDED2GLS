@@ -5,6 +5,7 @@ import { useState } from "react";
 interface ShipmentActionsProps {
   shipmentId: string;
   trackingNumber: string | null;
+  labelData: string | null;
   trackingSyncStatus: "NOT_SYNCED" | "SYNCED" | "ERROR";
   status: "PENDING" | "LABELED" | "COMPLETED";
   holdedEmailStatus: "NOT_SENT" | "SENT" | "ERROR";
@@ -15,6 +16,7 @@ interface ShipmentActionsProps {
 export function ShipmentActions({
   shipmentId,
   trackingNumber,
+  labelData,
   trackingSyncStatus,
   status,
   holdedEmailStatus,
@@ -119,6 +121,32 @@ export function ShipmentActions({
               className="bg-orange-600 hover:bg-orange-700 text-white"
             />
           </>
+        )}
+
+        {/* Download label PDF */}
+        {labelData && trackingNumber && (
+          <ActionButton
+            label="Download Label"
+            loading={false}
+            disabled={loading !== null}
+            onClick={() => {
+              const byteCharacters = atob(labelData);
+              const bytes = new Uint8Array(byteCharacters.length);
+              for (let i = 0; i < byteCharacters.length; i++) {
+                bytes[i] = byteCharacters.charCodeAt(i);
+              }
+              const blob = new Blob([bytes.buffer as ArrayBuffer], {
+                type: "application/pdf",
+              });
+              const url = URL.createObjectURL(blob);
+              const a = document.createElement("a");
+              a.href = url;
+              a.download = `label-${trackingNumber}.pdf`;
+              a.click();
+              URL.revokeObjectURL(url);
+            }}
+            className="bg-gray-600 hover:bg-gray-700 text-white"
+          />
         )}
 
         {/* Retry sync (only when in error state) */}

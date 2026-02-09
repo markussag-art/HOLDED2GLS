@@ -14,7 +14,9 @@ export interface CreateShipmentInput {
   recipientCity?: string;
   recipientPostalCode?: string;
   recipientCountry?: string;
+  recipientPhone?: string;
   recipientEmail?: string;
+  recipientProvince?: string;
   weight?: number;
   packages?: number;
   reference?: string;

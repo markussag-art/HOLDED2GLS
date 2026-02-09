@@ -49,10 +49,17 @@ model Shipment {
   recipientCity         String?
   recipientPostalCode   String?
   recipientCountry      String?  @default("ES")
+  recipientPhone        String?
   recipientEmail        String?
+  recipientProvince     String?
   weight                Float?
   packages              Int?     @default(1)
   reference             String?
+
+  // Holded document metadata (for sync)
+  holdedDocNumber       String?
+  holdedContactId       String?
+  holdedNotes           String?
 
   // Concurrency lock
   lockUntil             DateTime?

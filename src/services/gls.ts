@@ -1,13 +1,14 @@
 /**
- * GLS Spain API integration for label creation and shipment management.
+ * GLS Spain B2B SOAP API integration.
  *
- * This service handles communication with the GLS web services to:
- * - Create shipments and generate labels
- * - Cancel shipments (optional)
- * - Generate tracking URLs
+ * Endpoint: https://wsclientes.asmred.com/b2b.asmx
+ * Uses SOAP 1.2 with GrabaServicios for shipment creation,
+ * EtiquetaEnvio for label retrieval, and Anula for cancellation.
  *
- * In production, replace the mock implementations with actual GLS API calls.
+ * Authentication is via the uidcliente attribute (no user/password needed for B2B).
  */
+
+import { proxyFetch } from "@/lib/fetch";
 
 export interface GLSShipmentRequest {
   recipientName: string;
@@ -15,9 +16,19 @@ export interface GLSShipmentRequest {
   recipientCity: string;
   recipientPostalCode: string;
   recipientCountry: string;
+  recipientPhone?: string;
+  recipientEmail?: string;
+  recipientProvince?: string;
   weight: number;
   packages: number;
   reference?: string;
+  notes?: string;
+  // Sender info (optional — uses defaults if not provided)
+  senderName?: string;
+  senderAddress?: string;
+  senderCity?: string;
+  senderPostalCode?: string;
+  senderCountry?: string;
 }
 
 export interface GLSShipmentResponse {
@@ -26,15 +37,57 @@ export interface GLSShipmentResponse {
   trackingUrl: string;
 }
 
-const GLS_API_BASE = process.env.GLS_API_URL ?? "https://wsclientes.asmred.com";
-const GLS_TRACKING_BASE = "https://www.gls-spain.es/es/ayuda/seguimiento";
+/** Validation errors for label-ready checks */
+export interface LabelValidationError {
+  field: string;
+  message: string;
+}
 
-function getGLSCredentials() {
-  return {
-    user: process.env.GLS_USER ?? "",
-    password: process.env.GLS_PASSWORD ?? "",
-    uidClient: process.env.GLS_UID_CLIENT ?? "",
-  };
+const GLS_B2B_ENDPOINT =
+  process.env.GLS_WSDL_URL?.replace("?wsdl", "") ??
+  `${process.env.GLS_API_URL ?? "https://wsclientes.asmred.com"}/b2b.asmx`;
+
+const GLS_TRACKING_BASE = "https://www.gls-spain.es/es/ayuda/seguimiento";
+const ASM_NAMESPACE = "http://www.asmred.com/";
+
+function getUidClient(): string {
+  const uid = process.env.GLS_UID_CLIENT ?? "";
+  if (!uid) {
+    throw new Error("GLS_UID_CLIENT environment variable is not set");
+  }
+  return uid;
+}
+
+/**
+ * Validate that a shipment request has all required fields for GLS label generation.
+ * Returns an array of validation errors (empty = valid).
+ */
+export function validateLabelReady(request: Partial<GLSShipmentRequest>): LabelValidationError[] {
+  const errors: LabelValidationError[] = [];
+
+  if (!request.recipientName?.trim()) {
+    errors.push({ field: "recipientName", message: "Recipient name is required" });
+  }
+  if (!request.recipientAddress?.trim()) {
+    errors.push({ field: "recipientAddress", message: "Recipient address is required" });
+  }
+  if (!request.recipientCity?.trim()) {
+    errors.push({ field: "recipientCity", message: "Recipient city is required" });
+  }
+  if (!request.recipientPostalCode?.trim()) {
+    errors.push({ field: "recipientPostalCode", message: "Postal code is required" });
+  }
+  if (!request.recipientPhone?.trim()) {
+    errors.push({ field: "recipientPhone", message: "Recipient phone is required" });
+  }
+  if (!request.weight || request.weight <= 0) {
+    errors.push({ field: "weight", message: "Weight must be greater than 0" });
+  }
+  if (!request.packages || request.packages < 1) {
+    errors.push({ field: "packages", message: "Package count must be at least 1" });
+  }
+
+  return errors;
 }
 
 /**
@@ -45,146 +98,294 @@ export function generateGLSTrackingUrl(trackingNumber: string): string {
 }
 
 /**
- * Create a GLS shipment and generate a label.
- * Returns tracking number and label data.
+ * Create a GLS shipment via B2B SOAP API and return tracking + label.
  *
- * In production, this calls the GLS/ASM web service (SOAP or REST).
- * For now, this uses a simulated implementation that generates realistic data.
+ * Uses GrabaServicios with inline label request via <DevuelveAdicionales>.
+ * Falls back to EtiquetaEnvio if inline label is not returned.
  */
 export async function createGLSShipment(
   request: GLSShipmentRequest
 ): Promise<GLSShipmentResponse> {
-  const credentials = getGLSCredentials();
+  const uidClient = getUidClient();
 
-  // If GLS API credentials are configured, use the real API
-  if (credentials.user && credentials.password) {
-    return callGLSApi(request, credentials);
-  }
+  // If UID is the test key, still use the real API
+  const today = new Date();
+  const dateStr = `${String(today.getDate()).padStart(2, "0")}/${String(today.getMonth() + 1).padStart(2, "0")}/${today.getFullYear()}`;
 
-  // Fallback: simulated response for development/testing
-  return simulateGLSShipment(request);
-}
+  const docIn = buildGrabaServiciosXml(uidClient, request, dateStr);
 
-/**
- * Cancel a GLS shipment by tracking number.
- * Returns true if cancellation succeeded.
- */
-export async function cancelGLSShipment(
-  trackingNumber: string
-): Promise<boolean> {
-  const credentials = getGLSCredentials();
+  const soapEnvelope = `<?xml version="1.0" encoding="utf-8"?>
+<soap12:Envelope xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xmlns:xsd="http://www.w3.org/2001/XMLSchema" xmlns:soap12="http://www.w3.org/2003/05/soap-envelope">
+  <soap12:Body>
+    <GrabaServicios xmlns="${ASM_NAMESPACE}">
+      <docIn>${docIn}</docIn>
+    </GrabaServicios>
+  </soap12:Body>
+</soap12:Envelope>`;
 
-  if (credentials.user && credentials.password) {
-    return callGLSCancelApi(trackingNumber, credentials);
-  }
+  console.log("[GLS] Calling GrabaServicios at", GLS_B2B_ENDPOINT);
 
-  // Simulated: always succeed in dev
-  return true;
-}
-
-// --- Internal implementations ---
-
-async function callGLSApi(
-  request: GLSShipmentRequest,
-  credentials: { user: string; password: string; uidClient: string }
-): Promise<GLSShipmentResponse> {
-  // GLS/ASM SOAP service call
-  const soapBody = `<?xml version="1.0" encoding="utf-8"?>
-<soap:Envelope xmlns:soap="http://schemas.xmlsoap.org/soap/envelope/">
-  <soap:Body>
-    <GrabarEnvio xmlns="http://www.asmred.com/">
-      <uidcliente>${credentials.uidClient}</uidcliente>
-      <usuario>${credentials.user}</usuario>
-      <password>${credentials.password}</password>
-      <nombre_dst>${escapeXml(request.recipientName)}</nombre_dst>
-      <direccion_dst>${escapeXml(request.recipientAddress)}</direccion_dst>
-      <poblacion_dst>${escapeXml(request.recipientCity)}</poblacion_dst>
-      <cp_dst>${escapeXml(request.recipientPostalCode)}</cp_dst>
-      <pais_dst>${escapeXml(request.recipientCountry)}</pais_dst>
-      <peso>${request.weight}</peso>
-      <bultos>${request.packages}</bultos>
-      <referencia>${escapeXml(request.reference ?? "")}</referencia>
-    </GrabarEnvio>
-  </soap:Body>
-</soap:Envelope>`;
-
-  const response = await fetch(`${GLS_API_BASE}/services.asmx`, {
+  const response = await proxyFetch(GLS_B2B_ENDPOINT, {
     method: "POST",
     headers: {
-      "Content-Type": "text/xml; charset=utf-8",
-      SOAPAction: "http://www.asmred.com/GrabarEnvio",
+      "Content-Type": "application/soap+xml; charset=utf-8",
     },
-    body: soapBody,
+    body: soapEnvelope,
   });
 
   if (!response.ok) {
-    throw new Error(`GLS API error: ${response.status} ${response.statusText}`);
+    const text = await response.text().catch(() => "");
+    throw new Error(
+      `GLS B2B API error: ${response.status} ${response.statusText}. ${text.slice(0, 500)}`
+    );
   }
 
   const responseText = await response.text();
 
-  // Parse SOAP response to extract tracking number and label
-  const trackingMatch = responseText.match(
-    /<codbarras>(.*?)<\/codbarras>/
-  );
-  const labelMatch = responseText.match(/<etiqueta>(.*?)<\/etiqueta>/);
+  // Log response (redacting sensitive data)
+  console.log("[GLS] GrabaServicios response length:", responseText.length);
 
-  if (!trackingMatch?.[1]) {
-    // Check for error in response
-    const errorMatch = responseText.match(/<resultado>(.*?)<\/resultado>/);
-    throw new Error(
-      `GLS shipment creation failed: ${errorMatch?.[1] ?? "Unknown error"}`
-    );
+  // Parse tracking number from response
+  // codbarras can be an attribute on <Envio codbarras="..."> or element content
+  const trackingNumber =
+    extractXmlAttribute(responseText, "Envio", "codbarras") ||
+    extractXmlAttribute(responseText, "codbarras", "codbarras") ||
+    extractXmlValue(responseText, "codbarras");
+
+  // Check for error in response: return="-109" means error, return="0" is success
+  const returnCode = extractXmlAttribute(responseText, "Resultado", "return");
+  const errorElement = extractXmlValue(responseText, "Error");
+
+  if (!trackingNumber || (returnCode && returnCode !== "0" && !trackingNumber)) {
+    const errorMsg = errorElement ||
+      extractXmlValue(responseText, "Mensaje") ||
+      extractXmlValue(responseText, "GrabaServiciosResult") ||
+      responseText.slice(0, 500);
+    throw new Error(`GLS shipment creation failed: ${errorMsg}`);
   }
 
-  const trackingNumber = trackingMatch[1];
+  // Check for errors alongside tracking number
+  if (errorElement && returnCode !== "0") {
+    console.warn("[GLS] Warning from API:", errorElement);
+  }
+
+  // Extract inline label from <Etiquetas><Etiqueta bulto="1">base64...</Etiqueta>
+  // Use specific regex to match <Etiqueta bulto="N"> (not <Etiquetas>)
+  const etiquetaMatch = responseText.match(
+    /<Etiqueta\s+bulto="[^"]*">([\s\S]*?)<\/Etiqueta>/i
+  );
+  let labelData = etiquetaMatch?.[1]?.trim() ?? "";
+
+  // If no inline label, try separate EtiquetaEnvio call
+  if (!labelData) {
+    try {
+      labelData = await getLabel(uidClient, trackingNumber);
+    } catch (e) {
+      console.warn("[GLS] EtiquetaEnvio fallback failed:", e);
+      // Label retrieval is non-critical — tracking is already created
+    }
+  }
 
   return {
     trackingNumber,
-    labelData: labelMatch?.[1] ?? "",
+    labelData,
     trackingUrl: generateGLSTrackingUrl(trackingNumber),
   };
 }
 
-async function callGLSCancelApi(
+/**
+ * Retrieve a label for an existing shipment via EtiquetaEnvio.
+ */
+export async function getLabel(
+  uidClient: string,
   trackingNumber: string,
-  credentials: { user: string; password: string; uidClient: string }
-): Promise<boolean> {
-  const soapBody = `<?xml version="1.0" encoding="utf-8"?>
-<soap:Envelope xmlns:soap="http://schemas.xmlsoap.org/soap/envelope/">
-  <soap:Body>
-    <AnularEnvio xmlns="http://www.asmred.com/">
-      <uidcliente>${credentials.uidClient}</uidcliente>
-      <usuario>${credentials.user}</usuario>
-      <password>${credentials.password}</password>
-      <codbarras>${escapeXml(trackingNumber)}</codbarras>
-    </AnularEnvio>
-  </soap:Body>
-</soap:Envelope>`;
+  labelType: string = "PDF"
+): Promise<string> {
+  const soapEnvelope = `<?xml version="1.0" encoding="utf-8"?>
+<soap12:Envelope xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xmlns:xsd="http://www.w3.org/2001/XMLSchema" xmlns:soap12="http://www.w3.org/2003/05/soap-envelope">
+  <soap12:Body>
+    <EtiquetaEnvio xmlns="${ASM_NAMESPACE}">
+      <uidCliente>${escapeXml(uidClient)}</uidCliente>
+      <codigo>${escapeXml(trackingNumber)}</codigo>
+      <tipoEtiqueta>${escapeXml(labelType)}</tipoEtiqueta>
+      <plataforma></plataforma>
+    </EtiquetaEnvio>
+  </soap12:Body>
+</soap12:Envelope>`;
 
-  const response = await fetch(`${GLS_API_BASE}/services.asmx`, {
+  console.log("[GLS] Calling EtiquetaEnvio for", trackingNumber);
+
+  const response = await proxyFetch(GLS_B2B_ENDPOINT, {
     method: "POST",
     headers: {
-      "Content-Type": "text/xml; charset=utf-8",
-      SOAPAction: "http://www.asmred.com/AnularEnvio",
+      "Content-Type": "application/soap+xml; charset=utf-8",
     },
-    body: soapBody,
+    body: soapEnvelope,
   });
 
-  return response.ok;
+  if (!response.ok) {
+    throw new Error(`GLS EtiquetaEnvio error: ${response.status}`);
+  }
+
+  const responseText = await response.text();
+
+  // The response contains base64Binary data
+  const base64Match = responseText.match(/<base64Binary>([\s\S]*?)<\/base64Binary>/);
+  if (base64Match?.[1]) {
+    return base64Match[1].trim();
+  }
+
+  // Try alternate response format
+  const resultMatch = responseText.match(/<EtiquetaEnvioResult>([\s\S]*?)<\/EtiquetaEnvioResult>/);
+  if (resultMatch?.[1]) {
+    // Might be wrapped in more XML; extract base64
+    const innerBase64 = resultMatch[1].match(/<base64Binary>([\s\S]*?)<\/base64Binary>/);
+    return innerBase64?.[1]?.trim() ?? resultMatch[1].trim();
+  }
+
+  throw new Error("No label data in EtiquetaEnvio response");
 }
 
-function simulateGLSShipment(
-  _request: GLSShipmentRequest
-): GLSShipmentResponse {
-  const trackingNumber = `GLS${Date.now()}${Math.random().toString(36).slice(2, 6).toUpperCase()}`;
-  return {
-    trackingNumber,
-    labelData: Buffer.from(`SIMULATED_LABEL_${trackingNumber}`).toString(
-      "base64"
-    ),
-    trackingUrl: generateGLSTrackingUrl(trackingNumber),
-  };
+/**
+ * Cancel a GLS shipment via B2B Anula function.
+ */
+export async function cancelGLSShipment(
+  trackingNumber: string
+): Promise<boolean> {
+  const uidClient = getUidClient();
+
+  const docIn = `<Servicios uidcliente="${escapeXml(uidClient)}" xmlns="${ASM_NAMESPACE}"><Envio codbarras="${escapeXml(trackingNumber)}"/></Servicios>`;
+
+  const soapEnvelope = `<?xml version="1.0" encoding="utf-8"?>
+<soap12:Envelope xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xmlns:xsd="http://www.w3.org/2001/XMLSchema" xmlns:soap12="http://www.w3.org/2003/05/soap-envelope">
+  <soap12:Body>
+    <Anula xmlns="${ASM_NAMESPACE}">
+      <docIn>${docIn}</docIn>
+    </Anula>
+  </soap12:Body>
+</soap12:Envelope>`;
+
+  console.log("[GLS] Calling Anula for", trackingNumber);
+
+  const response = await proxyFetch(GLS_B2B_ENDPOINT, {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/soap+xml; charset=utf-8",
+    },
+    body: soapEnvelope,
+  });
+
+  if (!response.ok) {
+    console.error("[GLS] Anula failed:", response.status);
+    return false;
+  }
+
+  const text = await response.text();
+  console.log("[GLS] Anula response:", text.slice(0, 300));
+  return true;
+}
+
+// --- Internal helpers ---
+
+function buildGrabaServiciosXml(
+  uidClient: string,
+  req: GLSShipmentRequest,
+  dateStr: string
+): string {
+  const ref = req.reference ?? `REF-${Date.now()}`;
+
+  return `<Servicios uidcliente="${escapeXml(uidClient)}" xmlns="${ASM_NAMESPACE}">
+  <Envio codbarras="">
+    <Fecha>${escapeXml(dateStr)}</Fecha>
+    <Portes>P</Portes>
+    <Servicio>1</Servicio>
+    <Horario>2</Horario>
+    <Bultos>${req.packages}</Bultos>
+    <Peso>${req.weight}</Peso>
+    <Volumen></Volumen>
+    <Declarado></Declarado>
+    <DNINomb>0</DNINomb>
+    <FechaPrevistaEntrega></FechaPrevistaEntrega>
+    <Retorno>0</Retorno>
+    <Pod>N</Pod>
+    <PODObligatorio>N</PODObligatorio>
+    <Remite>
+      <Plaza></Plaza>
+      <Nombre>${escapeXml(req.senderName ?? process.env.GLS_SENDER_NAME ?? "Holded2GLS")}</Nombre>
+      <Direccion>${escapeXml(req.senderAddress ?? process.env.GLS_SENDER_ADDRESS ?? "")}</Direccion>
+      <Poblacion>${escapeXml(req.senderCity ?? process.env.GLS_SENDER_CITY ?? "")}</Poblacion>
+      <Provincia></Provincia>
+      <Pais>${escapeXml(req.senderCountry ?? process.env.GLS_SENDER_COUNTRY ?? "ES")}</Pais>
+      <CP>${escapeXml(req.senderPostalCode ?? process.env.GLS_SENDER_POSTAL_CODE ?? "")}</CP>
+      <Telefono>${escapeXml(process.env.GLS_SENDER_PHONE ?? "")}</Telefono>
+      <Movil></Movil>
+      <Email></Email>
+      <Departamento/>
+      <NIF/>
+      <Observaciones></Observaciones>
+    </Remite>
+    <Destinatario>
+      <Codigo></Codigo>
+      <Plaza></Plaza>
+      <Nombre>${escapeXml(req.recipientName)}</Nombre>
+      <Direccion>${escapeXml(req.recipientAddress)}</Direccion>
+      <Poblacion>${escapeXml(req.recipientCity)}</Poblacion>
+      <Provincia>${escapeXml(req.recipientProvince ?? "")}</Provincia>
+      <Pais>${escapeXml(req.recipientCountry)}</Pais>
+      <CP>${escapeXml(req.recipientPostalCode)}</CP>
+      <Telefono>${escapeXml(req.recipientPhone ?? "")}</Telefono>
+      <Movil></Movil>
+      <Email>${escapeXml(req.recipientEmail ?? "")}</Email>
+      <Observaciones>${escapeXml(req.notes ?? "")}</Observaciones>
+      <ATT></ATT>
+      <Departamento></Departamento>
+      <NIF/>
+    </Destinatario>
+    <Referencias>
+      <Referencia tipo="C">${escapeXml(ref)}</Referencia>
+      <Referencia tipo="0"/>
+    </Referencias>
+    <Importes>
+      <Debido/>
+      <Reembolso></Reembolso>
+    </Importes>
+    <Seguro tipo="0">
+      <Descripcion></Descripcion>
+      <Importe></Importe>
+    </Seguro>
+    <DevuelveAdicionales>
+      <PlazaDestino/>
+      <Etiqueta tipo="PDF"/>
+      <EtiquetaDevolucion tipo="PDF"/>
+    </DevuelveAdicionales>
+    <DevolverDatosASMDestino/>
+    <Cliente>
+      <Codigo></Codigo>
+      <Plaza></Plaza>
+      <Agente></Agente>
+    </Cliente>
+  </Envio>
+</Servicios>`;
+}
+
+function extractXmlAttribute(
+  xml: string,
+  tagName: string,
+  attrName: string
+): string | null {
+  const regex = new RegExp(
+    `<${tagName}[^>]*\\b${attrName}="([^"]*)"`,
+    "i"
+  );
+  const match = xml.match(regex);
+  return match?.[1]?.trim() || null;
+}
+
+function extractXmlValue(xml: string, tagName: string): string | null {
+  // Case-insensitive tag search
+  const regex = new RegExp(`<${tagName}[^>]*>([\\s\\S]*?)</${tagName}>`, "i");
+  const match = xml.match(regex);
+  return match?.[1]?.trim() || null;
 }
 
 function escapeXml(str: string): string {

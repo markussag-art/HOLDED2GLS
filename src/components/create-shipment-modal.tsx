@@ -29,7 +29,9 @@ export function CreateShipmentModal({
       recipientCity: formData.get("recipientCity") as string,
       recipientPostalCode: formData.get("recipientPostalCode") as string,
       recipientCountry: (formData.get("recipientCountry") as string) || "ES",
+      recipientPhone: formData.get("recipientPhone") as string,
       recipientEmail: formData.get("recipientEmail") as string,
+      recipientProvince: formData.get("recipientProvince") as string,
       weight: parseFloat(formData.get("weight") as string) || 1,
       packages: parseInt(formData.get("packages") as string) || 1,
       reference: formData.get("reference") as string,
@@ -140,14 +142,25 @@ export function CreateShipmentModal({
               />
             </div>
 
-            <div>
-              <label className="block text-sm font-medium mb-1">Email</label>
-              <input
-                name="recipientEmail"
-                type="email"
-                className="w-full px-3 py-2 rounded-md border border-gray-300 dark:border-gray-600 dark:bg-gray-800 text-sm"
-                placeholder="customer@example.com"
-              />
+            <div className="grid grid-cols-2 gap-4">
+              <div>
+                <label className="block text-sm font-medium mb-1">Email</label>
+                <input
+                  name="recipientEmail"
+                  type="email"
+                  className="w-full px-3 py-2 rounded-md border border-gray-300 dark:border-gray-600 dark:bg-gray-800 text-sm"
+                  placeholder="customer@example.com"
+                />
+              </div>
+              <div>
+                <label className="block text-sm font-medium mb-1">Phone</label>
+                <input
+                  name="recipientPhone"
+                  type="tel"
+                  className="w-full px-3 py-2 rounded-md border border-gray-300 dark:border-gray-600 dark:bg-gray-800 text-sm"
+                  placeholder="+34 600 000 000"
+                />
+              </div>
             </div>
 
             <div>
@@ -159,7 +172,7 @@ export function CreateShipmentModal({
               />
             </div>
 
-            <div className="grid grid-cols-3 gap-4">
+            <div className="grid grid-cols-2 gap-4">
               <div>
                 <label className="block text-sm font-medium mb-1">City</label>
                 <input
@@ -174,6 +187,19 @@ export function CreateShipmentModal({
                 <input
                   name="recipientPostalCode"
                   className="w-full px-3 py-2 rounded-md border border-gray-300 dark:border-gray-600 dark:bg-gray-800 text-sm"
+                />
+              </div>
+            </div>
+
+            <div className="grid grid-cols-2 gap-4">
+              <div>
+                <label className="block text-sm font-medium mb-1">
+                  Province
+                </label>
+                <input
+                  name="recipientProvince"
+                  className="w-full px-3 py-2 rounded-md border border-gray-300 dark:border-gray-600 dark:bg-gray-800 text-sm"
+                  placeholder="e.g. Barcelona"
                 />
               </div>
               <div>

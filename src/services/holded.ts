@@ -5,7 +5,10 @@ import type {
   HoldedSendDocumentPayload,
   HoldedDocType,
   UpdateTrackingInfoParams,
+  HoldedDocument,
+  HoldedContact,
 } from "@/types/holded";
+import { proxyFetch } from "@/lib/fetch";
 
 const HOLDED_API_BASE = "https://api.holded.com/api/invoicing/v1";
 
@@ -23,7 +26,7 @@ async function holdedRequest(
   body: unknown,
   method: "POST" | "PUT" = "POST"
 ): Promise<HoldedApiResponse> {
-  const response = await fetch(url, {
+  const response = await proxyFetch(url, {
     method,
     headers: {
       "Content-Type": "application/json",
@@ -31,6 +34,28 @@ async function holdedRequest(
       key: getApiKey(),
     },
     body: JSON.stringify(body),
+  });
+
+  if (!response.ok) {
+    const errorText = await response.text().catch(() => "Unknown error");
+    throw new HoldedApiError(
+      `Holded API error ${response.status}: ${errorText}`,
+      response.status,
+      errorText
+    );
+  }
+
+  return response.json();
+}
+
+/** Shared helper for Holded GET requests */
+async function holdedGet<T>(url: string): Promise<T> {
+  const response = await proxyFetch(url, {
+    method: "GET",
+    headers: {
+      Accept: "application/json",
+      key: getApiKey(),
+    },
   });
 
   if (!response.ok) {
@@ -100,6 +125,47 @@ export const holded = {
     const { docType, documentId, payload } = params;
     const url = `${HOLDED_API_BASE}/documents/${docType}/${documentId}/send`;
     return holdedRequest(url, payload);
+  },
+
+  /**
+   * List all documents of a given type.
+   *
+   * GET /documents/{docType}?page={page}
+   */
+  async listDocuments(params: {
+    docType: HoldedDocType;
+    page?: number;
+  }): Promise<HoldedDocument[]> {
+    const { docType, page } = params;
+    let url = `${HOLDED_API_BASE}/documents/${docType}`;
+    if (page !== undefined) {
+      url += `?page=${page}`;
+    }
+    return holdedGet<HoldedDocument[]>(url);
+  },
+
+  /**
+   * Get a single document by ID.
+   *
+   * GET /documents/{docType}/{documentId}
+   */
+  async getDocument(params: {
+    docType: HoldedDocType;
+    documentId: string;
+  }): Promise<HoldedDocument> {
+    const { docType, documentId } = params;
+    const url = `${HOLDED_API_BASE}/documents/${docType}/${documentId}`;
+    return holdedGet<HoldedDocument>(url);
+  },
+
+  /**
+   * Get a contact by ID.
+   *
+   * GET /contacts/{contactId}
+   */
+  async getContact(contactId: string): Promise<HoldedContact> {
+    const url = `${HOLDED_API_BASE}/contacts/${contactId}`;
+    return holdedGet<HoldedContact>(url);
   },
 };
 
