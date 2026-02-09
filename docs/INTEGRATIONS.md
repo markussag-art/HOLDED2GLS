@@ -81,6 +81,113 @@ To clear/remove tracking from a document, send a request with empty string value
 
 ---
 
+## Holded API — Set Pipeline Stage (Complete)
+
+### Endpoint
+
+```
+PUT https://api.holded.com/api/invoicing/v1/documents/{docType}/{documentId}/pipeline/set
+```
+
+### Authentication
+
+Header-based API key:
+
+```
+key: <HOLDED_API_KEY>
+```
+
+### Path Parameters
+
+| Parameter    | Type   | Required | Description                                        |
+| ------------ | ------ | -------- | -------------------------------------------------- |
+| `docType`    | string | Yes      | Document type. Must be `salesorder` or `waybill`.   |
+| `documentId` | string | Yes      | The Holded document ID (MongoDB ObjectId format).   |
+
+### Request Body (JSON)
+
+```json
+{
+  "pipeline": "<PIPELINE_STAGE_ID>"
+}
+```
+
+| Field      | Type   | Required | Description                                                                 |
+| ---------- | ------ | -------- | --------------------------------------------------------------------------- |
+| `pipeline` | string | Yes      | Pipeline stage ID. Custom per Holded account — set via `HOLDED_COMPLETED_PIPELINE_ID` env var. |
+
+### Response
+
+```json
+{
+  "status": 1,
+  "info": "Updated"
+}
+```
+
+### Notes
+
+- Pipeline stages are **custom per Holded account**. You must look up the correct stage ID in your Holded settings and set it as `HOLDED_COMPLETED_PIPELINE_ID`.
+- This endpoint is idempotent — calling it again with the same pipeline ID has no side effects.
+
+---
+
+## Holded API — Send Document (Email)
+
+### Endpoint
+
+```
+POST https://api.holded.com/api/invoicing/v1/documents/{docType}/{documentId}/send
+```
+
+### Authentication
+
+Header-based API key:
+
+```
+key: <HOLDED_API_KEY>
+```
+
+### Path Parameters
+
+| Parameter    | Type   | Required | Description                                        |
+| ------------ | ------ | -------- | -------------------------------------------------- |
+| `docType`    | string | Yes      | Document type. Must be `salesorder` or `waybill`.   |
+| `documentId` | string | Yes      | The Holded document ID (MongoDB ObjectId format).   |
+
+### Request Body (JSON)
+
+```json
+{
+  "emails": "customer@example.com",
+  "mailTemplateId": "<TEMPLATE_ID>"
+}
+```
+
+| Field            | Type   | Required | Description                                                                                   |
+| ---------------- | ------ | -------- | --------------------------------------------------------------------------------------------- |
+| `emails`         | string | Yes      | Recipient email address(es), comma-separated for multiple.                                    |
+| `mailTemplateId` | string | No       | Holded email template ID. If omitted, uses the default template.                              |
+| `subject`        | string | No       | Custom email subject. Overrides template subject if provided.                                 |
+| `message`        | string | No       | Custom email body. Overrides template message if provided.                                    |
+| `docIds`         | string | No       | Comma-separated document IDs to attach. Defaults to the document in the URL.                  |
+
+### Response
+
+```json
+{
+  "status": 1,
+  "info": "Sent"
+}
+```
+
+### Notes
+
+- The `emails` field is **required** — the API does not auto-use the contact's stored email.
+- Optionally configure `HOLDED_WAYBILL_MAIL_TEMPLATE_ID` env var to use a custom email template.
+
+---
+
 ## GLS Spain API (ASM Red)
 
 ### Base URL
@@ -143,3 +250,16 @@ https://www.gls-spain.es/es/ayuda/seguimiento/?match={trackingNumber}
 4. Platform saves new tracking number locally
 5. Platform calls Holded `updatetracking` with new tracking info
 6. Each step can fail independently — errors are reported and retryable
+
+### Complete & Email
+1. Pre-checks: tracking number exists, `trackingSyncStatus == SYNCED`, status != COMPLETED, recipient email present
+2. Platform calls Holded `pipeline/set` to mark waybill as Completed (skipped if already done — idempotent)
+3. Platform calls Holded `send` to email the waybill PDF to the customer
+4. If both succeed: `status = COMPLETED`, `holdedEmailStatus = SENT`
+5. If pipeline succeeds but email fails: `holdedEmailStatus = ERROR`, status stays LABELED — user sees "Retry Email"
+6. If pipeline fails: error returned, nothing changes locally
+
+### Resend Email
+1. Available when `holdedEmailStatus == ERROR` or when COMPLETED + already SENT
+2. Platform calls Holded `send` to re-send the waybill email
+3. Updates `holdedEmailStatus` and `holdedEmailSentAt` on success

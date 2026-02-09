@@ -6,6 +6,9 @@ interface ShipmentActionsProps {
   shipmentId: string;
   trackingNumber: string | null;
   trackingSyncStatus: "NOT_SYNCED" | "SYNCED" | "ERROR";
+  status: "PENDING" | "LABELED" | "COMPLETED";
+  holdedEmailStatus: "NOT_SENT" | "SENT" | "ERROR";
+  recipientEmail: string | null;
   onActionComplete: () => void;
 }
 
@@ -13,10 +16,14 @@ export function ShipmentActions({
   shipmentId,
   trackingNumber,
   trackingSyncStatus,
+  status,
+  holdedEmailStatus,
+  recipientEmail,
   onActionComplete,
 }: ShipmentActionsProps) {
   const [loading, setLoading] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const [successMsg, setSuccessMsg] = useState<string | null>(null);
 
   async function handleAction(
     action: string,
@@ -26,6 +33,7 @@ export function ShipmentActions({
 
     setLoading(action);
     setError(null);
+    setSuccessMsg(null);
 
     try {
       const res = await fetch(`/api/shipments/${shipmentId}/${action}`, {
@@ -38,6 +46,13 @@ export function ShipmentActions({
         return;
       }
 
+      // Show success for complete/resend actions
+      if (action === "complete") {
+        setSuccessMsg("Marked as Completed in Holded and email sent.");
+      } else if (action === "resend-email") {
+        setSuccessMsg("Email resent successfully.");
+      }
+
       onActionComplete();
     } catch (err) {
       setError(err instanceof Error ? err.message : "Network error");
@@ -46,10 +61,27 @@ export function ShipmentActions({
     }
   }
 
+  // Determine "Complete & Email" button state
+  const canComplete =
+    trackingNumber !== null &&
+    trackingSyncStatus === "SYNCED" &&
+    status !== "COMPLETED";
+
+  const completeDisabledReason = !trackingNumber
+    ? "No tracking number. Generate a label first."
+    : trackingSyncStatus !== "SYNCED"
+      ? "Tracking not synced to Holded yet."
+      : status === "COMPLETED"
+        ? "Already completed."
+        : !recipientEmail
+          ? "Customer email missing."
+          : null;
+
   return (
     <div className="flex flex-col gap-1">
       <div className="flex flex-wrap gap-1">
-        {!trackingNumber && (
+        {/* Label generation */}
+        {!trackingNumber && status !== "COMPLETED" && (
           <ActionButton
             label="Generate Label"
             loading={loading === "generate-label"}
@@ -59,7 +91,8 @@ export function ShipmentActions({
           />
         )}
 
-        {trackingNumber && (
+        {/* Tracking management (only when not completed) */}
+        {trackingNumber && status !== "COMPLETED" && (
           <>
             <ActionButton
               label="Delete Tracking"
@@ -88,6 +121,7 @@ export function ShipmentActions({
           </>
         )}
 
+        {/* Retry sync (only when in error state) */}
         {trackingSyncStatus === "ERROR" && (
           <ActionButton
             label="Retry Sync"
@@ -97,10 +131,54 @@ export function ShipmentActions({
             className="bg-yellow-600 hover:bg-yellow-700 text-white"
           />
         )}
+
+        {/* Complete & Email button */}
+        {status !== "COMPLETED" && (
+          <span title={completeDisabledReason ?? undefined}>
+            <ActionButton
+              label="Complete & Email"
+              loading={loading === "complete"}
+              disabled={loading !== null || !canComplete || !recipientEmail}
+              onClick={() =>
+                handleAction(
+                  "complete",
+                  "This will mark the waybill as Completed in Holded and send the customer email. Continue?"
+                )
+              }
+              className="bg-emerald-600 hover:bg-emerald-700 text-white"
+            />
+          </span>
+        )}
+
+        {/* Resend email (only when email failed or already sent and user wants resend) */}
+        {(holdedEmailStatus === "ERROR" ||
+          (status === "COMPLETED" && holdedEmailStatus === "SENT")) && (
+          <ActionButton
+            label={holdedEmailStatus === "ERROR" ? "Retry Email" : "Resend Email"}
+            loading={loading === "resend-email"}
+            disabled={loading !== null}
+            onClick={() =>
+              handleAction(
+                "resend-email",
+                "This will send the waybill email again. Continue?"
+              )
+            }
+            className={
+              holdedEmailStatus === "ERROR"
+                ? "bg-yellow-600 hover:bg-yellow-700 text-white"
+                : "bg-gray-600 hover:bg-gray-700 text-white"
+            }
+          />
+        )}
       </div>
 
       {error && (
         <p className="text-xs text-red-600 dark:text-red-400 mt-1">{error}</p>
+      )}
+      {successMsg && (
+        <p className="text-xs text-green-600 dark:text-green-400 mt-1">
+          {successMsg}
+        </p>
       )}
     </div>
   );

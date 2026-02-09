@@ -1,6 +1,10 @@
 "use client";
 
-import { SyncStatusBadge } from "./sync-status-badge";
+import {
+  SyncStatusBadge,
+  ShipmentStatusBadge,
+  EmailStatusBadge,
+} from "./sync-status-badge";
 import { ShipmentActions } from "./shipment-actions";
 
 interface Shipment {
@@ -15,7 +19,11 @@ interface Shipment {
   trackingSyncStatus: "NOT_SYNCED" | "SYNCED" | "ERROR";
   trackingSyncError: string | null;
   trackingSyncedAt: string | null;
+  status: "PENDING" | "LABELED" | "COMPLETED";
+  holdedEmailStatus: "NOT_SENT" | "SENT" | "ERROR";
+  holdedEmailError: string | null;
   recipientName: string | null;
+  recipientEmail: string | null;
   reference: string | null;
 }
 
@@ -43,10 +51,13 @@ export function ShipmentTable({ shipments, onRefresh }: ShipmentTableProps) {
               Tracking
             </th>
             <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+              Status
+            </th>
+            <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
               Holded Sync
             </th>
             <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
-              Holded Doc
+              Email
             </th>
             <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
               Actions
@@ -65,7 +76,10 @@ export function ShipmentTable({ shipments, onRefresh }: ShipmentTableProps) {
                 </div>
               </td>
               <td className="px-4 py-3 text-sm">
-                {s.recipientName ?? "-"}
+                <div>{s.recipientName ?? "-"}</div>
+                {s.recipientEmail && (
+                  <div className="text-xs text-gray-400">{s.recipientEmail}</div>
+                )}
               </td>
               <td className="px-4 py-3 text-sm">
                 <span className="inline-flex items-center px-2 py-0.5 rounded text-xs font-medium bg-gray-100 text-gray-800 dark:bg-gray-800 dark:text-gray-300">
@@ -100,6 +114,9 @@ export function ShipmentTable({ shipments, onRefresh }: ShipmentTableProps) {
                 )}
               </td>
               <td className="px-4 py-3 text-sm">
+                <ShipmentStatusBadge status={s.status} />
+              </td>
+              <td className="px-4 py-3 text-sm">
                 <SyncStatusBadge
                   status={s.trackingSyncStatus}
                   error={s.trackingSyncError}
@@ -114,19 +131,19 @@ export function ShipmentTable({ shipments, onRefresh }: ShipmentTableProps) {
                 )}
               </td>
               <td className="px-4 py-3 text-sm">
-                <div className="text-xs">
-                  <span className="text-gray-500">{s.holdedDocType}</span>
-                  <br />
-                  <span className="font-mono text-xs text-gray-400">
-                    {s.holdedDocumentId.slice(0, 12)}...
-                  </span>
-                </div>
+                <EmailStatusBadge
+                  status={s.holdedEmailStatus}
+                  error={s.holdedEmailError}
+                />
               </td>
               <td className="px-4 py-3 text-sm">
                 <ShipmentActions
                   shipmentId={s.id}
                   trackingNumber={s.trackingNumber}
                   trackingSyncStatus={s.trackingSyncStatus}
+                  status={s.status}
+                  holdedEmailStatus={s.holdedEmailStatus}
+                  recipientEmail={s.recipientEmail}
                   onActionComplete={onRefresh}
                 />
               </td>

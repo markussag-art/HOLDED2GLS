@@ -29,6 +29,7 @@ export function CreateShipmentModal({
       recipientCity: formData.get("recipientCity") as string,
       recipientPostalCode: formData.get("recipientPostalCode") as string,
       recipientCountry: (formData.get("recipientCountry") as string) || "ES",
+      recipientEmail: formData.get("recipientEmail") as string,
       weight: parseFloat(formData.get("weight") as string) || 1,
       packages: parseInt(formData.get("packages") as string) || 1,
       reference: formData.get("reference") as string,
@@ -136,6 +137,16 @@ export function CreateShipmentModal({
                 name="recipientName"
                 className="w-full px-3 py-2 rounded-md border border-gray-300 dark:border-gray-600 dark:bg-gray-800 text-sm"
                 placeholder="Recipient name"
+              />
+            </div>
+
+            <div>
+              <label className="block text-sm font-medium mb-1">Email</label>
+              <input
+                name="recipientEmail"
+                type="email"
+                className="w-full px-3 py-2 rounded-md border border-gray-300 dark:border-gray-600 dark:bg-gray-800 text-sm"
+                placeholder="customer@example.com"
               />
             </div>
 

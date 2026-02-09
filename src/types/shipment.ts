@@ -2,6 +2,9 @@ export type TrackingSyncStatus = "NOT_SYNCED" | "SYNCED" | "ERROR";
 
 export type Carrier = "GLS" | "MRW";
 
+export type ShipmentStatus = "PENDING" | "LABELED" | "COMPLETED";
+export type EmailStatus = "NOT_SENT" | "SENT" | "ERROR";
+
 export interface CreateShipmentInput {
   holdedDocType: string;
   holdedDocumentId: string;
@@ -11,6 +14,7 @@ export interface CreateShipmentInput {
   recipientCity?: string;
   recipientPostalCode?: string;
   recipientCountry?: string;
+  recipientEmail?: string;
   weight?: number;
   packages?: number;
   reference?: string;

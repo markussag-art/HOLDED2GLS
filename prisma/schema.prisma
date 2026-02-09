@@ -33,12 +33,23 @@ model Shipment {
   trackingSyncError     String?
   holdedTrackingPayload String?  // JSON snapshot of last payload sent
 
+  // Shipment / workflow status
+  status                String   @default("PENDING") // PENDING | LABELED | COMPLETED
+
+  // Completion & email
+  completedAt           DateTime?
+  holdedCompletedAt     DateTime?
+  holdedEmailSentAt     DateTime?
+  holdedEmailStatus     String   @default("NOT_SENT") // NOT_SENT | SENT | ERROR
+  holdedEmailError      String?
+
   // Shipment details
   recipientName         String?
   recipientAddress      String?
   recipientCity         String?
   recipientPostalCode   String?
   recipientCountry      String?  @default("ES")
+  recipientEmail        String?
   weight                Float?
   packages              Int?     @default(1)
   reference             String?
@@ -49,4 +60,5 @@ model Shipment {
 
   @@index([holdedDocumentId])
   @@index([trackingSyncStatus])
+  @@index([status])
 }

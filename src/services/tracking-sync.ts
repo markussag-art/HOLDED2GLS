@@ -202,7 +202,7 @@ export async function generateLabel(shipmentId: string): Promise<Shipment> {
       reference: shipment.reference ?? undefined,
     });
 
-    // Persist tracking info locally
+    // Persist tracking info locally and set status to LABELED
     const updated = await prisma.shipment.update({
       where: { id: shipmentId },
       data: {
@@ -210,6 +210,7 @@ export async function generateLabel(shipmentId: string): Promise<Shipment> {
         trackingUrl: glsResult.trackingUrl,
         labelData: glsResult.labelData,
         labelObsolete: false,
+        status: "LABELED",
         trackingSyncStatus: "NOT_SYNCED",
       },
     });
@@ -241,13 +242,14 @@ export async function deleteTracking(shipmentId: string): Promise<Shipment> {
       throw new Error("Shipment has no tracking number to delete.");
     }
 
-    // Clear local tracking fields
+    // Clear local tracking fields and reset status to PENDING
     await prisma.shipment.update({
       where: { id: shipmentId },
       data: {
         trackingNumber: null,
         trackingUrl: null,
         labelObsolete: true,
+        status: "PENDING",
         trackingSyncStatus: "NOT_SYNCED",
         trackingSyncError: null,
         holdedTrackingPayload: null,

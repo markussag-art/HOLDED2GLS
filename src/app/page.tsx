@@ -18,7 +18,11 @@ interface Shipment {
   trackingSyncedAt: string | null;
   trackingSyncStatus: "NOT_SYNCED" | "SYNCED" | "ERROR";
   trackingSyncError: string | null;
+  status: "PENDING" | "LABELED" | "COMPLETED";
+  holdedEmailStatus: "NOT_SENT" | "SENT" | "ERROR";
+  holdedEmailError: string | null;
   recipientName: string | null;
+  recipientEmail: string | null;
   reference: string | null;
 }
 

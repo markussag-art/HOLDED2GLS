@@ -47,6 +47,7 @@ export async function POST(request: NextRequest) {
       recipientCity: body.recipientCity,
       recipientPostalCode: body.recipientPostalCode,
       recipientCountry: body.recipientCountry ?? "ES",
+      recipientEmail: body.recipientEmail,
       weight: body.weight,
       packages: body.packages ?? 1,
       reference: body.reference,
