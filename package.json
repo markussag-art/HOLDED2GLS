@@ -1,0 +1,26 @@
+{
+  "name": "holded2gls",
+  "version": "1.0.0",
+  "description": "Holded → GLS shipping label generation webapp",
+  "main": "src/server.js",
+  "scripts": {
+    "start": "node src/server.js",
+    "dev": "node src/server.js",
+    "test": "jest --forceExit --detectOpenHandles",
+    "test:unit": "jest tests/unit --forceExit",
+    "test:integration": "jest tests/integration --forceExit",
+    "migrate": "node src/migrations/run.js"
+  },
+  "dependencies": {
+    "better-sqlite3": "^11.0.0",
+    "body-parser": "^1.20.2",
+    "dotenv": "^16.4.5",
+    "ejs": "^3.1.10",
+    "express": "^4.19.2",
+    "soap": "^1.0.4",
+    "axios": "^1.7.2"
+  },
+  "devDependencies": {
+    "jest": "^29.7.0"
+  }
+}

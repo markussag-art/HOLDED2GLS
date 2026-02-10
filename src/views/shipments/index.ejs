@@ -1,0 +1,57 @@
+<% locals.title = 'Shipments' %>
+<h1>Shipments</h1>
+
+<div style="margin-bottom: 16px;">
+  <a href="/shipments/new" class="btn btn-primary">+ New Shipment</a>
+  <a href="/shipments/import" class="btn btn-success">Import from Holded</a>
+</div>
+
+<div class="card">
+  <% if (shipments.length === 0) { %>
+    <p>No shipments yet. Create one or import from Holded.</p>
+  <% } else { %>
+    <table>
+      <thead>
+        <tr>
+          <th>ID</th>
+          <th>Waybill Ref</th>
+          <th>Recipient</th>
+          <th>Shipping Method</th>
+          <th>Status</th>
+          <th>Tracking</th>
+          <th>Actions</th>
+        </tr>
+      </thead>
+      <tbody>
+        <% shipments.forEach(s => { %>
+        <tr>
+          <td><%= s.id %></td>
+          <td><%= s.holded_waybill_number || '-' %></td>
+          <td>
+            <strong><%= s.recipient_commercial_name || s.recipient_name %></strong>
+            <% if (s.recipient_commercial_name && s.recipient_name && s.recipient_commercial_name !== s.recipient_name) { %>
+              <br><small><%= s.recipient_name %></small>
+            <% } %>
+          </td>
+          <td>
+            <% const m = shippingMethods.find(x => x.key === s.shipping_method); %>
+            <%= m ? m.label : s.shipping_method %>
+          </td>
+          <td>
+            <span class="badge badge-<%= s.status === 'LABEL_GENERATED' ? 'generated' : s.status === 'ERROR' ? 'error' : 'pending' %>">
+              <%= s.status %>
+            </span>
+          </td>
+          <td><%= s.gls_tracking_number || '-' %></td>
+          <td>
+            <a href="/shipments/<%= s.id %>" class="btn btn-primary btn-sm">View</a>
+            <% if (s.gls_label_data) { %>
+              <a href="/shipments/<%= s.id %>/label" class="btn btn-success btn-sm" target="_blank">Label</a>
+            <% } %>
+          </td>
+        </tr>
+        <% }) %>
+      </tbody>
+    </table>
+  <% } %>
+</div>

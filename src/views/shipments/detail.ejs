@@ -1,0 +1,96 @@
+<% locals.title = `Shipment #${shipment.id}` %>
+<h1>Shipment #<%= shipment.id %></h1>
+
+<% if (error) { %>
+  <div class="alert alert-danger"><%= error %></div>
+<% } %>
+
+<% if (shipment.status === 'LABEL_GENERATED') { %>
+  <div class="alert alert-success">
+    Label generated! Tracking: <strong><%= shipment.gls_tracking_number || 'N/A' %></strong>
+    &nbsp; <a href="/shipments/<%= shipment.id %>/label" class="btn btn-success btn-sm" target="_blank">Download Label</a>
+  </div>
+<% } else if (shipment.status === 'ERROR') { %>
+  <div class="alert alert-danger">
+    Label generation failed. Check debug panel below for details.
+  </div>
+<% } %>
+
+<div class="card">
+  <h3>Recipient</h3>
+  <table>
+    <tr><td><strong>Commercial Name</strong></td><td><%= shipment.recipient_commercial_name || '-' %></td></tr>
+    <tr><td><strong>Legal Name</strong></td><td><%= shipment.recipient_name || '-' %></td></tr>
+    <tr><td><strong>Address</strong></td><td><%= shipment.recipient_address %>, <%= shipment.recipient_city %> <%= shipment.recipient_postal_code %></td></tr>
+    <tr><td><strong>Province / Country</strong></td><td><%= shipment.recipient_province || '' %> / <%= shipment.recipient_country %></td></tr>
+    <tr><td><strong>Phone</strong></td><td><%= shipment.recipient_phone || '-' %></td></tr>
+    <tr><td><strong>Email</strong></td><td><%= shipment.recipient_email || '-' %></td></tr>
+  </table>
+</div>
+
+<div class="card">
+  <h3>Sender / Emitter</h3>
+  <table>
+    <tr><td><strong>Name</strong></td><td><%= shipment.sender_name %></td></tr>
+    <tr><td><strong>CIF</strong></td><td><%= shipment.sender_cif %></td></tr>
+    <tr><td><strong>Address</strong></td><td><%= shipment.sender_address %>, <%= shipment.sender_city %> <%= shipment.sender_postal_code %></td></tr>
+    <tr><td><strong>Country</strong></td><td><%= shipment.sender_country %></td></tr>
+  </table>
+</div>
+
+<div class="card">
+  <h3>Shipping</h3>
+  <table>
+    <tr><td><strong>Method</strong></td><td><%= method ? method.label : shipment.shipping_method %></td></tr>
+    <tr><td><strong>GLS Service Code</strong></td><td><%= shipment.gls_service_code %></td></tr>
+    <tr><td><strong>Waybill Reference</strong></td><td>Ref. Cli. Albaran <%= shipment.holded_waybill_number || shipment.holded_doc_number || '-' %></td></tr>
+    <tr><td><strong>Delivery Morning</strong></td><td><%= shipment.delivery_morning ? 'Yes' : 'No' %></td></tr>
+    <tr><td><strong>Delivery Afternoon</strong></td><td><%= shipment.delivery_afternoon ? 'Yes' : 'No' %></td></tr>
+    <tr><td><strong>Notes</strong></td><td><%= shipment.delivery_notes || '-' %></td></tr>
+    <tr><td><strong>Weight</strong></td><td><%= shipment.weight %> kg</td></tr>
+    <tr><td><strong>Packages</strong></td><td><%= shipment.packages %></td></tr>
+  </table>
+</div>
+
+<div class="card">
+  <h3>Status</h3>
+  <p>
+    <span class="badge badge-<%= shipment.status === 'LABEL_GENERATED' ? 'generated' : shipment.status === 'ERROR' ? 'error' : 'pending' %>">
+      <%= shipment.status %>
+    </span>
+    <% if (shipment.gls_tracking_number) { %>
+      &nbsp; Tracking: <strong><%= shipment.gls_tracking_number %></strong>
+    <% } %>
+  </p>
+
+  <% if (shipment.status === 'PENDING') { %>
+    <form method="POST" action="/shipments/<%= shipment.id %>/generate-label" style="margin-top:12px;">
+      <button type="submit" class="btn btn-success">Generate GLS Label</button>
+    </form>
+  <% } %>
+</div>
+
+<!-- DEBUG PANEL (Admin) -->
+<div class="card">
+  <h3>GLS Request Payload (Debug)</h3>
+  <p class="section-title">Preview of SOAP payload fields — secrets redacted</p>
+  <div class="debug-panel"><%= JSON.stringify(debugPayload, null, 2) %></div>
+</div>
+
+<% if (shipment.gls_request_payload) { %>
+<div class="card">
+  <h3>Last Sent Payload</h3>
+  <div class="debug-panel"><%= shipment.gls_request_payload %></div>
+</div>
+<% } %>
+
+<% if (shipment.gls_response_payload) { %>
+<div class="card">
+  <h3>GLS Response</h3>
+  <div class="debug-panel"><%= shipment.gls_response_payload %></div>
+</div>
+<% } %>
+
+<div style="margin-top: 16px;">
+  <a href="/shipments" class="btn btn-primary">Back to List</a>
+</div>

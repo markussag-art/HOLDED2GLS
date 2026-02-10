@@ -1,0 +1,39 @@
+<% locals.title = 'Import from Holded' %>
+<h1>Import Waybill from Holded</h1>
+
+<% if (error) { %>
+  <div class="alert alert-danger"><%= error %></div>
+<% } %>
+
+<div class="card">
+  <% if (waybills.length === 0) { %>
+    <p>No waybills found. Make sure your HOLDED_API_KEY is configured in .env</p>
+  <% } else { %>
+    <table>
+      <thead>
+        <tr>
+          <th>Doc Number</th>
+          <th>Contact</th>
+          <th>Date</th>
+          <th>Action</th>
+        </tr>
+      </thead>
+      <tbody>
+        <% waybills.forEach(w => { %>
+        <tr>
+          <td><%= w.docNumber || w.id %></td>
+          <td><%= w.contactName || '-' %></td>
+          <td><%= w.date ? new Date(w.date * 1000).toLocaleDateString('es-ES') : '-' %></td>
+          <td>
+            <form method="POST" action="/shipments/import/<%= w.id || w._id %>" style="display:inline;">
+              <button type="submit" class="btn btn-primary btn-sm">Import</button>
+            </form>
+          </td>
+        </tr>
+        <% }) %>
+      </tbody>
+    </table>
+  <% } %>
+</div>
+
+<a href="/shipments" class="btn">Back</a>

@@ -1,0 +1,175 @@
+<% locals.title = shipment ? 'Edit Shipment' : 'New Shipment' %>
+<h1><%= shipment && shipment.holdedDocNumber ? `Shipment from Holded: ${shipment.holdedDocNumber}` : 'New Shipment' %></h1>
+
+<% if (error) { %>
+  <div class="alert alert-danger"><%= error %></div>
+<% } %>
+
+<form method="POST" action="/shipments">
+  <!-- Hidden Holded fields -->
+  <input type="hidden" name="holdedDocId" value="<%= shipment ? shipment.holdedDocId || '' : '' %>">
+  <input type="hidden" name="holdedDocNumber" value="<%= shipment ? shipment.holdedDocNumber || '' : '' %>">
+  <input type="hidden" name="holdedWaybillNumber" value="<%= shipment ? shipment.holdedWaybillNumber || shipment.holdedDocNumber || '' : '' %>">
+
+  <!-- RECIPIENT -->
+  <fieldset>
+    <legend>Recipient / Destinatario</legend>
+    <div class="form-row">
+      <div class="form-group">
+        <label for="recipientCommercialName">Commercial Name (Nombre Comercial)</label>
+        <input type="text" id="recipientCommercialName" name="recipientCommercialName"
+               value="<%= shipment ? shipment.recipientCommercialName || '' : '' %>" required>
+      </div>
+      <div class="form-group">
+        <label for="recipientName">Legal Name (Nombre)</label>
+        <input type="text" id="recipientName" name="recipientName"
+               value="<%= shipment ? shipment.recipientName || '' : '' %>">
+      </div>
+    </div>
+    <div class="form-group">
+      <label for="recipientAddress">Address</label>
+      <input type="text" id="recipientAddress" name="recipientAddress"
+             value="<%= shipment ? shipment.recipientAddress || '' : '' %>" required>
+    </div>
+    <div class="form-row">
+      <div class="form-group">
+        <label for="recipientCity">City</label>
+        <input type="text" id="recipientCity" name="recipientCity"
+               value="<%= shipment ? shipment.recipientCity || '' : '' %>" required>
+      </div>
+      <div class="form-group">
+        <label for="recipientPostalCode">Postal Code</label>
+        <input type="text" id="recipientPostalCode" name="recipientPostalCode"
+               value="<%= shipment ? shipment.recipientPostalCode || '' : '' %>" required>
+      </div>
+      <div class="form-group">
+        <label for="recipientProvince">Province</label>
+        <input type="text" id="recipientProvince" name="recipientProvince"
+               value="<%= shipment ? shipment.recipientProvince || '' : '' %>">
+      </div>
+      <div class="form-group">
+        <label for="recipientCountry">Country</label>
+        <input type="text" id="recipientCountry" name="recipientCountry"
+               value="<%= shipment ? shipment.recipientCountry || 'ES' : 'ES' %>">
+      </div>
+    </div>
+    <div class="form-row">
+      <div class="form-group">
+        <label for="recipientPhone">Phone</label>
+        <input type="text" id="recipientPhone" name="recipientPhone"
+               value="<%= shipment ? shipment.recipientPhone || '' : '' %>">
+      </div>
+      <div class="form-group">
+        <label for="recipientEmail">Email</label>
+        <input type="email" id="recipientEmail" name="recipientEmail"
+               value="<%= shipment ? shipment.recipientEmail || '' : '' %>">
+      </div>
+    </div>
+  </fieldset>
+
+  <!-- SENDER -->
+  <fieldset>
+    <legend>Sender / Remitente (Yogufruta SCP)</legend>
+    <div class="form-row">
+      <div class="form-group">
+        <label for="senderName">Name</label>
+        <input type="text" id="senderName" name="senderName"
+               value="<%= sender.name %>">
+      </div>
+      <div class="form-group">
+        <label for="senderCif">CIF / NIF</label>
+        <input type="text" id="senderCif" name="senderCif"
+               value="<%= sender.cif %>">
+      </div>
+    </div>
+    <div class="form-group">
+      <label for="senderAddress">Address</label>
+      <input type="text" id="senderAddress" name="senderAddress"
+             value="<%= sender.address %>">
+    </div>
+    <div class="form-row">
+      <div class="form-group">
+        <label for="senderCity">City</label>
+        <input type="text" id="senderCity" name="senderCity"
+               value="<%= sender.city %>">
+      </div>
+      <div class="form-group">
+        <label for="senderPostalCode">Postal Code</label>
+        <input type="text" id="senderPostalCode" name="senderPostalCode"
+               value="<%= sender.postalCode %>">
+      </div>
+      <div class="form-group">
+        <label for="senderCountry">Country</label>
+        <input type="text" id="senderCountry" name="senderCountry"
+               value="<%= sender.country %>">
+      </div>
+    </div>
+    <div class="form-row">
+      <div class="form-group">
+        <label for="senderPhone">Phone</label>
+        <input type="text" id="senderPhone" name="senderPhone"
+               value="<%= sender.phone %>">
+      </div>
+      <div class="form-group">
+        <label for="senderEmail">Email</label>
+        <input type="email" id="senderEmail" name="senderEmail"
+               value="<%= sender.email %>">
+      </div>
+    </div>
+  </fieldset>
+
+  <!-- SHIPPING METHOD -->
+  <fieldset>
+    <legend>Shipping Method / Método de Envío</legend>
+    <div class="form-group">
+      <label for="shippingMethod">Select Service</label>
+      <select id="shippingMethod" name="shippingMethod" required>
+        <% shippingMethods.forEach(m => { %>
+          <option value="<%= m.key %>"
+                  <%= (shipment && shipment.shippingMethod === m.key) ? 'selected' : '' %>>
+            <%= m.label %>
+          </option>
+        <% }) %>
+      </select>
+    </div>
+  </fieldset>
+
+  <!-- DELIVERY NOTES -->
+  <fieldset>
+    <legend>Delivery Notes / Notas de Entrega</legend>
+    <div class="checkbox-group">
+      <input type="checkbox" id="deliveryMorning" name="deliveryMorning"
+             <%= (shipment && shipment.deliveryMorning) ? 'checked' : '' %>>
+      <label for="deliveryMorning">Entregar por la mañana</label>
+    </div>
+    <div class="checkbox-group">
+      <input type="checkbox" id="deliveryAfternoon" name="deliveryAfternoon"
+             <%= (shipment && shipment.deliveryAfternoon) ? 'checked' : '' %>>
+      <label for="deliveryAfternoon">Entregar por la tarde</label>
+    </div>
+    <div class="form-group">
+      <label for="deliveryNotes">Additional Notes</label>
+      <textarea id="deliveryNotes" name="deliveryNotes" rows="2"><%= shipment ? shipment.deliveryNotes || '' : '' %></textarea>
+    </div>
+  </fieldset>
+
+  <!-- PACKAGE INFO -->
+  <fieldset>
+    <legend>Package Info</legend>
+    <div class="form-row">
+      <div class="form-group">
+        <label for="weight">Weight (kg)</label>
+        <input type="number" id="weight" name="weight" step="0.1" min="0.1"
+               value="<%= shipment ? shipment.weight || 1 : 1 %>">
+      </div>
+      <div class="form-group">
+        <label for="packages">Packages</label>
+        <input type="number" id="packages" name="packages" min="1"
+               value="<%= shipment ? shipment.packages || 1 : 1 %>">
+      </div>
+    </div>
+  </fieldset>
+
+  <button type="submit" class="btn btn-primary">Create Shipment</button>
+  <a href="/shipments" class="btn" style="margin-left:8px;">Cancel</a>
+</form>
