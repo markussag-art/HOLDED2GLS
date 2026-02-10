@@ -1,8 +1,9 @@
 require('dotenv').config();
 const { getDb, closeDb } = require('../config/database');
 const migration001 = require('./001_initial');
+const migration002 = require('./002_tracking_url');
 
-const migrations = [migration001];
+const migrations = [migration001, migration002];
 
 function runMigrations() {
   const db = getDb();

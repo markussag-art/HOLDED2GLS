@@ -88,9 +88,62 @@ function extractShipmentData(waybill, contact) {
   };
 }
 
+/**
+ * Update tracking info on a Holded document ("Seguimiento").
+ *
+ * POST /api/invoicing/v1/documents/{docType}/{documentId}/updatetracking
+ * https://developers.holded.com/reference/update-tracking-info
+ *
+ * @param {string} docType - Document type (e.g. "waybill")
+ * @param {string} documentId - Holded document ID
+ * @param {object} trackingData - { trackingNumber, trackingUrl }
+ * @returns {{ success: boolean, payload: object, response: any }}
+ */
+async function updateTracking(docType, documentId, { trackingNumber, trackingUrl }) {
+  const client = createClient();
+
+  // Holded updatetracking payload:
+  // "tracking" field maps to "Seguimiento" in the Holded UI and customer emails.
+  // We send the full tracking URL so it appears as a clickable link.
+  const payload = {
+    tracking: trackingUrl || '',
+    trackingNumber: trackingNumber || '',
+  };
+
+  const redactedPayload = { ...payload };
+
+  try {
+    const response = await client.post(
+      `/documents/${docType}/${documentId}/updatetracking`,
+      payload,
+    );
+    return {
+      success: true,
+      payload: redactedPayload,
+      response: response.data,
+    };
+  } catch (error) {
+    return {
+      success: false,
+      payload: redactedPayload,
+      error: error.message,
+      response: error.response?.data || null,
+    };
+  }
+}
+
+/**
+ * Clear tracking info on a Holded document (for delete/regenerate).
+ */
+async function clearTracking(docType, documentId) {
+  return updateTracking(docType, documentId, { trackingNumber: '', trackingUrl: '' });
+}
+
 module.exports = {
   listWaybills,
   getWaybill,
   getContact,
   extractShipmentData,
+  updateTracking,
+  clearTracking,
 };

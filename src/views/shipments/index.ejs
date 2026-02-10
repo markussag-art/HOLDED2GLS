@@ -19,6 +19,7 @@
           <th>Shipping Method</th>
           <th>Status</th>
           <th>Tracking</th>
+          <th>Holded Sync</th>
           <th>Actions</th>
         </tr>
       </thead>
@@ -42,7 +43,19 @@
               <%= s.status %>
             </span>
           </td>
-          <td><%= s.gls_tracking_number || '-' %></td>
+          <td>
+            <% if (s.tracking_url) { %>
+              <a href="<%= s.tracking_url %>" target="_blank" rel="noopener" title="<%= s.tracking_url %>"><%= s.gls_tracking_number || 'Track' %></a>
+            <% } else { %>
+              <%= s.gls_tracking_number || '-' %>
+            <% } %>
+          </td>
+          <td>
+            <% const sync = s.holded_tracking_sync_status || 'NOT_SYNCED'; %>
+            <span class="badge badge-<%= sync === 'SYNCED' ? 'generated' : sync === 'NOT_SYNCED' ? 'pending' : 'error' %>">
+              <%= sync %>
+            </span>
+          </td>
           <td>
             <a href="/shipments/<%= s.id %>" class="btn btn-primary btn-sm">View</a>
             <% if (s.gls_label_data) { %>

@@ -4,12 +4,66 @@ const { GLS_CONFIG, getShippingMethodByKey, DELIVERY_WINDOWS } = require('../con
 let soapClient = null;
 
 /**
+ * GLS tracking URL base paths by country.
+ */
+const GLS_TRACKING_BASES = {
+  ES: 'https://mygls.gls-spain.es/e',
+  PT_EXPEDITION: 'https://mygls.gls-spain.es/expedition',
+};
+
+/**
  * Get or create the SOAP client for GLS Spain (ASM) b2b API.
  */
 async function getClient() {
   if (soapClient) return soapClient;
   soapClient = await soap.createClientAsync(GLS_CONFIG.wsdlUrl);
   return soapClient;
+}
+
+/**
+ * Build the full GLS tracking URL based on destination country.
+ *
+ * Rules:
+ *  - ES: https://mygls.gls-spain.es/e/<trackingNumber>/<postcode>
+ *  - PT: https://mygls.gls-spain.es/expedition/<expeditionId>
+ *  - Other: ES format if postcode available, otherwise throws.
+ *
+ * @param {object} params
+ * @param {string} params.trackingNumber - GLS parcel/shipment number
+ * @param {string} params.postcode - Destination postcode (digits only)
+ * @param {string} params.country - ISO-2 country code
+ * @param {string} [params.expeditionId] - GLS expedition UUID (required for PT)
+ * @returns {string} Full tracking URL
+ */
+function buildTrackingUrl({ trackingNumber, postcode, country, expeditionId }) {
+  const normalizedCountry = (country || '').toUpperCase().trim();
+  const normalizedPostcode = (postcode || '').replace(/\D/g, '');
+
+  if (!trackingNumber && normalizedCountry !== 'PT') {
+    throw new Error('Missing GLS tracking number for tracking URL.');
+  }
+
+  if (normalizedCountry === 'PT') {
+    if (!expeditionId) {
+      throw new Error('Missing GLS expedition ID for Portugal tracking.');
+    }
+    return `${GLS_TRACKING_BASES.PT_EXPEDITION}/${expeditionId}`;
+  }
+
+  if (normalizedCountry === 'ES') {
+    if (!normalizedPostcode) {
+      throw new Error('Missing destination postcode for GLS Spain tracking.');
+    }
+    return `${GLS_TRACKING_BASES.ES}/${trackingNumber}/${normalizedPostcode}`;
+  }
+
+  // Other countries: default to ES format if postcode exists
+  if (normalizedPostcode) {
+    console.warn(`[GLS Tracking] Country "${normalizedCountry}" using ES-format URL as fallback.`);
+    return `${GLS_TRACKING_BASES.ES}/${trackingNumber}/${normalizedPostcode}`;
+  }
+
+  throw new Error(`Cannot build tracking URL for country "${normalizedCountry}" without postcode. Provide a valid destination postcode.`);
 }
 
 /**
@@ -134,8 +188,20 @@ function redactPayload(payload) {
 }
 
 /**
+ * Extract expedition ID and tracking number from GLS SOAP response.
+ * For PT destinations, the expedition UUID is a separate field.
+ */
+function extractGlsResponseData(response) {
+  const trackingNumber = response?.Expedicion || response?.NumeroEnvio || response?.CodigoBarras || '';
+  const expeditionId = response?.ExpedicionUUID || response?.UID || response?.Uid || '';
+  const labelBase64 = response?.Etiqueta || response?.Label || '';
+
+  return { trackingNumber, expeditionId, labelBase64 };
+}
+
+/**
  * Send shipment to GLS via SOAP and retrieve label.
- * Returns { trackingNumber, labelBase64, rawResponse }.
+ * Returns { trackingNumber, expeditionId, labelBase64, rawResponse }.
  */
 async function createShipment(shipment) {
   const payload = buildGlsPayload(shipment);
@@ -145,15 +211,15 @@ async function createShipment(shipment) {
     const client = await getClient();
 
     // GLS Spain uses GrabarEnvio method in the b2b SOAP API
-    const [result] = await client.GrabarEnvioAsync({Ession: payload });
+    const [result] = await client.GrabarEnvioAsync({ Ession: payload });
 
     const response = result?.GrabarEnvioResult || result;
-    const trackingNumber = response?.Expedicion || response?.NumeroEnvio || '';
-    const labelBase64 = response?.Etiqueta || response?.Label || '';
+    const { trackingNumber, expeditionId, labelBase64 } = extractGlsResponseData(response);
 
     return {
       success: true,
       trackingNumber,
+      expeditionId,
       labelBase64,
       requestPayload: redacted,
       rawResponse: response,
@@ -170,9 +236,12 @@ async function createShipment(shipment) {
 
 module.exports = {
   getClient,
+  buildTrackingUrl,
   buildGlsPayload,
   buildReferenceString,
   buildDeliveryNotes,
   redactPayload,
+  extractGlsResponseData,
   createShipment,
+  GLS_TRACKING_BASES,
 };

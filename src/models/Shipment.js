@@ -92,12 +92,17 @@ const ShipmentModel = {
     return this.findById(id);
   },
 
-  updateGlsResult(id, { trackingNumber, labelData, requestPayload, responsePayload, status }) {
+  /**
+   * Update GLS result including tracking URL and expedition ID.
+   */
+  updateGlsResult(id, { trackingNumber, expeditionId, labelData, trackingUrl, requestPayload, responsePayload, status }) {
     const db = getDb();
     db.prepare(`
       UPDATE shipments SET
         gls_tracking_number = ?,
+        expedition_id = ?,
         gls_label_data = ?,
+        tracking_url = ?,
         gls_request_payload = ?,
         gls_response_payload = ?,
         status = ?,
@@ -105,12 +110,55 @@ const ShipmentModel = {
       WHERE id = ?
     `).run(
       trackingNumber || null,
+      expeditionId || null,
       labelData || null,
+      trackingUrl || null,
       requestPayload ? JSON.stringify(requestPayload) : null,
       responsePayload ? JSON.stringify(responsePayload) : null,
       status || 'LABEL_GENERATED',
       id,
     );
+    return this.findById(id);
+  },
+
+  /**
+   * Update Holded tracking sync status and store the payload sent.
+   */
+  updateHoldedTrackingSync(id, { syncStatus, payload }) {
+    const db = getDb();
+    db.prepare(`
+      UPDATE shipments SET
+        holded_tracking_sync_status = ?,
+        holded_tracking_payload = ?,
+        updated_at = datetime('now')
+      WHERE id = ?
+    `).run(
+      syncStatus || 'NOT_SYNCED',
+      payload ? JSON.stringify(payload) : null,
+      id,
+    );
+    return this.findById(id);
+  },
+
+  /**
+   * Clear all tracking data (for delete/regenerate flows).
+   */
+  clearTracking(id) {
+    const db = getDb();
+    db.prepare(`
+      UPDATE shipments SET
+        gls_tracking_number = NULL,
+        expedition_id = NULL,
+        tracking_url = NULL,
+        gls_label_data = NULL,
+        gls_request_payload = NULL,
+        gls_response_payload = NULL,
+        holded_tracking_sync_status = 'NOT_SYNCED',
+        holded_tracking_payload = NULL,
+        status = 'PENDING',
+        updated_at = datetime('now')
+      WHERE id = ?
+    `).run(id);
     return this.findById(id);
   },
 

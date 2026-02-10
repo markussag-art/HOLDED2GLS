@@ -77,7 +77,91 @@
 
 ---
 
-## F) Full End-to-End Test
+## F) Tracking URL — Spain (ES)
+
+- [ ] Create a shipment with `recipientCountry = ES` and a valid postal code (e.g., `28001`)
+- [ ] Generate label
+- [ ] In shipment detail, verify:
+  - [ ] Tracking URL format: `https://mygls.gls-spain.es/e/<TRACKING_NUMBER>/<POSTCODE>`
+  - [ ] Tracking URL is clickable and opens GLS tracking page
+  - [ ] Tracking number is displayed
+- [ ] Verify Holded sync status is `SYNCED`
+- [ ] Open Holded waybill — confirm "Seguimiento" shows the tracking URL
+- [ ] Confirm customer email from Holded contains the tracking link
+
+---
+
+## G) Tracking URL — Portugal (PT)
+
+- [ ] Create a shipment with `recipientCountry = PT`
+- [ ] Generate label
+- [ ] In shipment detail, verify:
+  - [ ] Expedition ID is populated (from GLS response)
+  - [ ] Tracking URL format: `https://mygls.gls-spain.es/expedition/<EXPEDITION_UUID>`
+  - [ ] Tracking URL is clickable
+- [ ] Verify Holded sync status is `SYNCED`
+- [ ] Open Holded waybill — confirm "Seguimiento" shows the PT tracking URL
+
+---
+
+## H) Tracking URL — Validation Errors
+
+- [ ] Create an ES shipment with **empty postal code**
+  - [ ] Label generation should proceed but tracking URL should fail
+  - [ ] Error message: "Missing destination postcode for GLS Spain tracking."
+  - [ ] Holded sync status should be `BLOCKED`
+  - [ ] "Complete & Email" button should be **disabled**
+- [ ] Create a PT shipment where GLS does not return an expedition UUID
+  - [ ] Error message: "Missing GLS expedition ID for Portugal tracking."
+  - [ ] Holded sync should be blocked
+
+---
+
+## I) Delete Tracking
+
+- [ ] On a shipment with a generated label and synced tracking:
+  - [ ] Click "Delete Tracking"
+  - [ ] Confirm dialog appears
+  - [ ] After confirmation:
+    - [ ] Tracking number cleared
+    - [ ] Tracking URL cleared
+    - [ ] Expedition ID cleared
+    - [ ] Label data cleared
+    - [ ] Status reset to `PENDING`
+    - [ ] Holded sync status reset to `NOT_SYNCED`
+  - [ ] Open Holded waybill — confirm "Seguimiento" is now empty
+
+---
+
+## J) Regenerate Label
+
+- [ ] On a shipment with a generated label:
+  - [ ] Click "Regenerate Label"
+  - [ ] Confirm dialog appears
+  - [ ] After confirmation:
+    - [ ] Old tracking data cleared first
+    - [ ] New GLS label generated
+    - [ ] New tracking URL built
+    - [ ] New tracking synced to Holded
+    - [ ] Holded sync status is `SYNCED`
+  - [ ] Verify new tracking URL is different from old one (if new tracking number differs)
+
+---
+
+## K) Complete & Email Button
+
+- [ ] Button is **disabled** when:
+  - [ ] No tracking number
+  - [ ] No tracking URL
+  - [ ] Holded sync status is not `SYNCED`
+- [ ] Button is **enabled** only when all three conditions met:
+  - [ ] Tracking number present
+  - [ ] Tracking URL present
+  - [ ] Holded sync status = `SYNCED`
+
+---
+
+## L) Full End-to-End Test
 
 For **each** of the 3 shipping methods, perform:
 
@@ -91,16 +175,19 @@ For **each** of the 3 shipping methods, perform:
    - [ ] `Referencia` with waybill number
    - [ ] `Observaciones` with delivery notes
    - [ ] `Nombre` with commercial name
-6. [ ] Download/view the generated label PDF
-7. [ ] On the printed label, confirm:
-   - [ ] Receiver commercial name visible
-   - [ ] Sender: Yogufruta SCP, C/ LA SELVA 26, Blanes, J65549842
-   - [ ] Reference line with waybill number
-   - [ ] Notes/observations printed (if GLS supports it for this service)
+6. [ ] Confirm tracking URL is generated and displayed
+7. [ ] Confirm Holded sync status is `SYNCED`
+8. [ ] Confirm Holded tracking sync payload is visible in debug panel
+9. [ ] Download/view the generated label PDF
+10. [ ] On the printed label, confirm:
+    - [ ] Receiver commercial name visible
+    - [ ] Sender: Yogufruta SCP, C/ LA SELVA 26, Blanes, J65549842
+    - [ ] Reference line with waybill number
+    - [ ] Notes/observations printed (if GLS supports it for this service)
 
 ---
 
-## G) Automated Tests
+## M) Automated Tests
 
 - [ ] Run `npm test` — all tests pass
 - [ ] Unit tests verify:
@@ -109,9 +196,15 @@ For **each** of the 3 shipping methods, perform:
   - [ ] Sender defaults are Yogufruta SCP
   - [ ] Reference format: "Ref. Cli. Albaran <NUMBER>"
   - [ ] Delivery notes build correctly
+  - [ ] **ES tracking URL: `https://mygls.gls-spain.es/e/<num>/<cp>`**
+  - [ ] **PT tracking URL: `https://mygls.gls-spain.es/expedition/<uuid>`**
+  - [ ] **Missing data throws errors**
 - [ ] Integration tests verify:
   - [ ] SOAP payload correct for each method
   - [ ] Morning/afternoon notes in Observaciones
+  - [ ] **Holded updatetracking payload contains full tracking URL**
+  - [ ] **Delete clears Seguimiento**
+  - [ ] **Regenerate updates Seguimiento with new URL**
 
 ---
 
@@ -122,3 +215,6 @@ For **each** of the 3 shipping methods, perform:
   the controllable parts. Physical label appearance depends on GLS template.
 - `Observaciones` may be truncated by GLS (~80-100 char limit).
 - `Remite_NIF` (CIF) printing on label depends on the GLS label template version.
+- For PT tracking, the `ExpedicionUUID` field must be present in the GLS SOAP response.
+  If your GLS contract does not return this field, PT tracking URLs cannot be generated.
+- Country is sourced from the Holded shipping address (`shippingAddress.country`), not user input.

@@ -5,6 +5,9 @@
 This application syncs delivery notes (albaranes) from **Holded** ERP and generates
 shipping labels via the **GLS Spain (ASM)** SOAP API (`b2b.asmx`).
 
+After label generation, a **tracking URL** is built based on the destination country
+and synced to Holded as "Seguimiento" so customers receive the link via email.
+
 ---
 
 ## GLS Spain SOAP API
@@ -37,6 +40,48 @@ shipping labels via the **GLS Spain (ASM)** SOAP API (`b2b.asmx`).
 
 > **Note:** These codes are based on the GLS Spain / ASM SOAP API documentation. If your GLS
 > contract uses different product codes, update `src/config/gls.js` accordingly.
+
+---
+
+## GLS Tracking URL Rules
+
+Tracking URLs are **country-dependent** and built by `buildTrackingUrl()` in `src/services/glsService.js`.
+
+### Spain (ES)
+
+**Format:** `https://mygls.gls-spain.es/e/<TRACKING_NUMBER>/<POSTCODE>`
+
+| Component | Source | Required |
+|---|---|---|
+| `TRACKING_NUMBER` | GLS SOAP response → `Expedicion` / `NumeroEnvio` | Yes |
+| `POSTCODE` | `shipments.recipient_postal_code` (digits only) | Yes |
+
+**Example:** `https://mygls.gls-spain.es/e/1253243472/10100`
+
+### Portugal (PT)
+
+**Format:** `https://mygls.gls-spain.es/expedition/<EXPEDITION_UUID>`
+
+| Component | Source | Required |
+|---|---|---|
+| `EXPEDITION_UUID` | GLS SOAP response → `ExpedicionUUID` / `UID` | Yes |
+
+**Example:** `https://mygls.gls-spain.es/expedition/72f06264-1afb-4275-bb74-384c52ccc846`
+
+### Other Countries
+
+- If destination postcode is available → uses ES format as fallback
+- If no postcode → throws error and blocks Holded sync
+- A warning is logged: `[GLS Tracking] Country "XX" using ES-format URL as fallback.`
+
+### Validation Rules
+
+| Condition | Result |
+|---|---|
+| Country = ES, no postcode | **Error:** "Missing destination postcode for GLS Spain tracking." |
+| Country = PT, no expeditionId | **Error:** "Missing GLS expedition ID for Portugal tracking." |
+| Other country, no postcode | **Error:** Cannot build tracking URL |
+| Missing tracking number (non-PT) | **Error:** "Missing GLS tracking number for tracking URL." |
 
 ---
 
@@ -116,6 +161,18 @@ currently enforce a character limit; consider adding validation if truncation is
 
 ---
 
+## GLS SOAP Response Handling
+
+After calling `GrabarEnvio`, the response is parsed for:
+
+| Response Field | Stored As | Used For |
+|---|---|---|
+| `Expedicion` / `NumeroEnvio` / `CodigoBarras` | `gls_tracking_number` | Tracking URL (ES) |
+| `ExpedicionUUID` / `UID` | `expedition_id` | Tracking URL (PT) |
+| `Etiqueta` / `Label` | `gls_label_data` | Label PDF (base64) |
+
+---
+
 ## Holded API
 
 ### Endpoints Used
@@ -125,6 +182,7 @@ currently enforce a character limit; consider adding validation if truncation is
 | List waybills | GET | `/api/invoicing/v1/documents/waybill` |
 | Get single waybill | GET | `/api/invoicing/v1/documents/waybill/:id` |
 | Get contact details | GET | `/api/invoicing/v1/contacts/:id` |
+| **Update tracking** | **POST** | **`/api/invoicing/v1/documents/{docType}/{documentId}/updatetracking`** |
 
 ### Key Holded Fields
 
@@ -132,6 +190,36 @@ currently enforce a character limit; consider adding validation if truncation is
 - `contact.name` → Legal / fiscal name of the recipient
 - `contact.tradeName` → Commercial name (nombre comercial) of the recipient
 - `waybill.shippingAddress` → Object with `address`, `city`, `postalCode`, `province`, `country`
+
+### Holded Tracking Sync ("Seguimiento")
+
+After label generation, the app calls `updateTracking()` to push the tracking URL to Holded:
+
+**Request:**
+```
+POST /api/invoicing/v1/documents/waybill/{docId}/updatetracking
+```
+
+**Payload:**
+```json
+{
+  "tracking": "https://mygls.gls-spain.es/e/1253243472/10100",
+  "trackingNumber": "1253243472"
+}
+```
+
+- `tracking` → Maps to "Seguimiento" in the Holded UI and customer emails
+- `trackingNumber` → Stored as auxiliary tracking reference
+
+The `tracking` field contains the **full clickable URL** so customers see the tracking link
+directly in their notification email from Holded.
+
+### Delete / Regenerate
+
+| Action | Steps |
+|---|---|
+| **Delete tracking** | 1. Call `updateTracking` with empty strings → clears Holded "Seguimiento" <br> 2. Clear local DB fields: `gls_tracking_number`, `expedition_id`, `tracking_url`, label data <br> 3. Reset status to `PENDING` |
+| **Regenerate label** | 1. Delete tracking (above) <br> 2. Call GLS `GrabarEnvio` again <br> 3. Extract new tracking/expedition data <br> 4. Build new tracking URL <br> 5. Push new URL to Holded |
 
 ---
 
@@ -149,6 +237,11 @@ Stores all shipment data including both Holded source fields and GLS results:
 - `delivery_morning` — Boolean: "Entregar por la mañana"
 - `delivery_afternoon` — Boolean: "Entregar por la tarde"
 - `delivery_notes` — Free-text additional notes
+- `gls_tracking_number` — GLS parcel tracking number
+- `expedition_id` — GLS expedition UUID (used for PT tracking URLs) *(added in migration 002)*
+- `tracking_url` — Full computed tracking URL *(added in migration 002)*
+- `holded_tracking_sync_status` — `NOT_SYNCED` | `SYNCED` | `SYNC_ERROR` | `BLOCKED` *(added in migration 002)*
+- `holded_tracking_payload` — JSON snapshot of last payload sent to Holded *(added in migration 002)*
 - `gls_request_payload` — JSON of the last SOAP request (secrets redacted)
 - `gls_response_payload` — JSON of the GLS SOAP response
 
