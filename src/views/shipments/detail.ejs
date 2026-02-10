@@ -22,12 +22,10 @@
 <div class="card">
   <h3>Recipient</h3>
   <table>
-    <tr><td><strong>Commercial Name</strong></td><td><%= shipment.recipient_commercial_name || '-' %></td></tr>
-    <tr><td><strong>Legal Name</strong></td><td><%= shipment.recipient_name || '-' %></td></tr>
-    <tr><td><strong>Address</strong></td><td><%= shipment.recipient_address %>, <%= shipment.recipient_city %> <%= shipment.recipient_postal_code %></td></tr>
-    <tr><td><strong>Province / Country</strong></td><td><%= shipment.recipient_province || '' %> / <%= shipment.recipient_country %></td></tr>
+    <tr><td><strong>Commercial Name</strong></td><td><%= shipment.recipient_commercial_name || shipment.recipient_name || '-' %></td></tr>
+    <tr><td><strong>Address</strong></td><td><%= shipment.recipient_address || '-' %></td></tr>
+    <tr><td><strong>Zip Code / City</strong></td><td><%= shipment.recipient_postal_code || '' %> <%= shipment.recipient_city || '' %></td></tr>
     <tr><td><strong>Phone</strong></td><td><%= shipment.recipient_phone || '-' %></td></tr>
-    <tr><td><strong>Email</strong></td><td><%= shipment.recipient_email || '-' %></td></tr>
   </table>
 </div>
 

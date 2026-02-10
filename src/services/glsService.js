@@ -123,11 +123,9 @@ function buildGlsPayload(shipment) {
   const recipientName = shipment.recipientName || shipment.recipient_name || '';
   const holdedWaybill = shipment.holdedWaybillNumber || shipment.holded_waybill_number || '';
 
-  // Commercial Name goes to primary name field; legal name to secondary
+  // Only Commercial Name appears on the label; legal name is NOT included
   const nameLine1 = recipientCommercialName || recipientName;
-  const nameLine2 = recipientCommercialName && recipientName && recipientCommercialName !== recipientName
-    ? recipientName
-    : '';
+  const nameLine2 = '';
 
   const referenceStr = buildReferenceString(holdedWaybill);
 

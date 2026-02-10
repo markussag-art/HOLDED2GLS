@@ -57,9 +57,9 @@ describe('GLS Shipment Integration (Mock SOAP)', () => {
       expect(payload.Referencia).toBe('Ref. Cli. Albaran A250029');
     });
 
-    test('receiver commercial name is in Nombre field', () => {
+    test('only commercial name appears on label, Nombre2 is empty', () => {
       expect(payload.Nombre).toBe('SuperTienda García');
-      expect(payload.Nombre2).toBe('Distribuciones García SL');
+      expect(payload.Nombre2).toBe('');
     });
   });
 

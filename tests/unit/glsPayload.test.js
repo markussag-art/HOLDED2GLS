@@ -71,20 +71,20 @@ describe('GLS Payload Builder', () => {
       expect(payload.Remite_NIF).toBe('J65549842');
     });
 
-    test('recipient commercial name goes to primary Nombre field', () => {
+    test('only commercial name appears on label (Nombre), Nombre2 is always empty', () => {
       const payload = buildGlsPayload(baseShipment);
       expect(payload.Nombre).toBe('TiendaTop');
-      expect(payload.Nombre2).toBe('Legal Name SL');
+      expect(payload.Nombre2).toBe('');
     });
 
-    test('when commercial name is same as name, Nombre2 is empty', () => {
+    test('when commercial name is same as name, Nombre2 is still empty', () => {
       const shipment = { ...baseShipment, recipientCommercialName: 'Legal Name SL' };
       const payload = buildGlsPayload(shipment);
       expect(payload.Nombre).toBe('Legal Name SL');
       expect(payload.Nombre2).toBe('');
     });
 
-    test('when no commercial name, falls back to name', () => {
+    test('when no commercial name, falls back to legal name in Nombre', () => {
       const shipment = { ...baseShipment, recipientCommercialName: '' };
       const payload = buildGlsPayload(shipment);
       expect(payload.Nombre).toBe('Legal Name SL');

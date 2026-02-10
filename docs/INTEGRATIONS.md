@@ -106,8 +106,8 @@ Below is the mapping from application data → GLS SOAP request fields → what 
 
 | Label Element | GLS SOAP Field | Source | Notes |
 |---|---|---|---|
-| Recipient main name | `Nombre` | Holded contact `tradeName` (Commercial Name) | Primary name line on label |
-| Recipient secondary name | `Nombre2` | Holded contact `name` (Legal Name) | Shown if different from Commercial Name |
+| Recipient name | `Nombre` | Holded contact `tradeName` (Commercial Name) | Only commercial name appears on label |
+| _(unused)_ | `Nombre2` | _(always empty)_ | Legal name is **not** printed on the label |
 | Recipient address | `Direccion` | Holded waybill `shippingAddress.address` | |
 | Recipient city | `Poblacion` | Holded waybill `shippingAddress.city` | |
 | Recipient postal code | `CP` | Holded waybill `shippingAddress.postalCode` | |

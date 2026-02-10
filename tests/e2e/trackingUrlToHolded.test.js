@@ -149,7 +149,7 @@ describe('E2E: Tracking URL to Holded — Full Flow', () => {
     const soapPayload = mockSoapClient.GrabarEnvioAsync.mock.calls[0][0].Ession;
     expect(soapPayload.Servicio).toBe('1');
     expect(soapPayload.Nombre).toBe('FrutasGarcía Shop');
-    expect(soapPayload.Nombre2).toBe('Frutas García SL');
+    expect(soapPayload.Nombre2).toBe('');
     expect(soapPayload.Referencia).toBe('Ref. Cli. Albaran A250029');
     expect(soapPayload.Observaciones).toContain('Entregar por la mañana');
     expect(soapPayload.Observaciones).toContain('Fragile');
