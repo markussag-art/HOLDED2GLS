@@ -1,11 +1,11 @@
 import fs from 'fs';
 import path from 'path';
-import { v4 as uuidv4 } from 'uuid';
-import { Shipment, SyncStatus } from '../models/shipment';
+import { Shipment, SyncStatus, ShippingMethod } from '../models/shipment';
 import * as repo from '../models/shipmentRepository';
 import { getHoldedClient } from '../clients/holdedClient';
-import { getGlsClient, GlsShipmentRequest } from '../clients/glsClient';
+import { getGlsClient, GlsShipmentRequest, redactGlsResponse } from '../clients/glsClient';
 import { buildTrackingUrl, isValidTrackingUrl } from '../utils/tracking';
+import { runPreflight, PreflightIssue } from '../utils/preflight';
 import { config } from '../utils/config';
 import { logger } from '../utils/logger';
 
@@ -15,9 +15,6 @@ const SENT_STAGE_ID = config.holdedSentStageId;
 // Lock set to prevent duplicate label generation
 const activeLocks = new Set<string>();
 
-/**
- * Acquire a per-document lock to prevent concurrent label generation.
- */
 function acquireLock(holdedDocumentId: string): boolean {
   if (activeLocks.has(holdedDocumentId)) return false;
   activeLocks.add(holdedDocumentId);
@@ -28,34 +25,33 @@ function releaseLock(holdedDocumentId: string): void {
   activeLocks.delete(holdedDocumentId);
 }
 
-// ── Label generation pipeline ────────────────────────────────────
+// ── Preflight validation ─────────────────────────────────────────
 
-export interface LabelGenerationInput {
-  holdedDocumentId: string;
-  holdedDocType?: string;
-
-  // Sender defaults (from app config or per-call override)
-  senderName: string;
-  senderAddress: string;
-  senderCity: string;
-  senderPostcode: string;
-  senderCountry: string;
-  senderPhone: string;
-
-  // Recipient
-  recipientName: string;
-  recipientAddress: string;
-  recipientCity: string;
-  recipientPostcode: string;
-  recipientCountry: string;
-  recipientPhone: string;
-  recipientEmail: string;
-
-  weight: number;
-  packages: number;
-  reference: string;
-  notes?: string;
+export function preflightCheck(shipmentId: string): PreflightIssue[] {
+  const shipment = repo.getShipmentById(shipmentId);
+  if (!shipment) return [{ field: 'id', message: 'Shipment not found' }];
+  return runPreflight(shipment);
 }
+
+// ── Update shipment params (weight, packages, method, notes) ─────
+
+export function updateShipmentParams(
+  shipmentId: string,
+  params: {
+    weight?: number;
+    packages?: number;
+    shippingMethod?: ShippingMethod;
+    deliveryNotes?: string;
+    recipientPhone?: string;
+    recipientEmail?: string;
+  },
+): Shipment {
+  const shipment = repo.getShipmentById(shipmentId);
+  if (!shipment) throw new Error(`Shipment ${shipmentId} not found`);
+  return repo.updateShipment(shipmentId, params)!;
+}
+
+// ── Label generation pipeline ────────────────────────────────────
 
 export interface LabelGenerationResult {
   shipment: Shipment;
@@ -65,46 +61,65 @@ export interface LabelGenerationResult {
 /**
  * Full label generation pipeline:
  *
+ *  0) Preflight validation
  *  1) GLS create shipment → trackingNumber (+ expeditionId if PT) → save PDF
  *  2) Build trackingUrl (ES/PT rules) → store locally
  *  3) Update Holded Seguimiento via /updatetracking
  *  4) Update Holded custom field "Seguimiento de Envio" via PUT
  *  5) Set Holded etapa to "🛻 => Enviado por API GLS" (ONLY if 3+4 succeed)
  *  6) Update local status fields
- *
- * If any Holded step fails, the label/tracking artifacts are preserved locally
- * and the error state is stored per step for granular retry.
  */
-export async function generateLabel(input: LabelGenerationInput): Promise<LabelGenerationResult> {
-  const docType = input.holdedDocType || 'waybill';
+export async function generateLabel(shipmentId: string): Promise<LabelGenerationResult> {
+  const shipment = repo.getShipmentById(shipmentId);
+  if (!shipment) throw new Error(`Shipment ${shipmentId} not found`);
+
+  const docType = shipment.holdedDocType || 'waybill';
   const errors: string[] = [];
 
-  if (!acquireLock(input.holdedDocumentId)) {
-    throw new Error(`Label generation already in progress for document ${input.holdedDocumentId}`);
+  if (!acquireLock(shipment.holdedDocumentId)) {
+    throw new Error(`Label generation already in progress for document ${shipment.holdedDocumentId}`);
   }
 
   try {
+    // ── Step 0: Preflight validation ─────────────────────────
+    const issues = runPreflight(shipment);
+    if (issues.length > 0) {
+      throw new Error(
+        'Preflight validation failed: ' +
+        issues.map(i => `${i.field}: ${i.message}`).join('; '),
+      );
+    }
+
     // ── Step 1: Create GLS shipment ──────────────────────────
     const glsClient = getGlsClient();
 
+    // Use commercial name as primary label name, person name as secondary
+    const labelName = shipment.recipientCommercialName || shipment.recipientName;
+    const contactName = shipment.recipientCommercialName
+      ? shipment.recipientName
+      : '';
+
     const glsRequest: GlsShipmentRequest = {
-      senderName: input.senderName,
-      senderAddress: input.senderAddress,
-      senderCity: input.senderCity,
-      senderPostcode: input.senderPostcode,
-      senderCountry: input.senderCountry,
-      senderPhone: input.senderPhone,
-      recipientName: input.recipientName,
-      recipientAddress: input.recipientAddress,
-      recipientCity: input.recipientCity,
-      recipientPostcode: input.recipientPostcode,
-      recipientCountry: input.recipientCountry,
-      recipientPhone: input.recipientPhone,
-      recipientEmail: input.recipientEmail,
-      weight: input.weight,
-      packages: input.packages,
-      reference: input.reference,
-      notes: input.notes,
+      senderName: config.sender.name,
+      senderAddress: config.sender.address,
+      senderCity: config.sender.city,
+      senderPostcode: config.sender.postcode,
+      senderCountry: config.sender.country,
+      senderPhone: config.sender.phone,
+      senderTaxId: config.sender.taxId,
+      recipientName: labelName,
+      recipientContactName: contactName,
+      recipientAddress: shipment.recipientAddress,
+      recipientCity: shipment.recipientCity,
+      recipientPostcode: shipment.recipientPostcode,
+      recipientCountry: shipment.recipientCountry,
+      recipientPhone: shipment.recipientPhone,
+      recipientEmail: shipment.recipientEmail,
+      weight: shipment.weight,
+      packages: shipment.packages,
+      shippingMethod: shipment.shippingMethod,
+      reference: `Ref. Cli. Albaran ${shipment.waybillNumber || shipment.holdedDocumentId}`,
+      notes: shipment.deliveryNotes || undefined,
     };
 
     const glsResult = await glsClient.createShipment(glsRequest);
@@ -125,55 +140,36 @@ export async function generateLabel(input: LabelGenerationInput): Promise<LabelG
 
     // ── Step 2: Build tracking URL ───────────────────────────
     const trackingUrl = buildTrackingUrl({
-      country: input.recipientCountry,
+      country: shipment.recipientCountry,
       trackingNumber: glsResult.trackingNumber,
-      postcode: input.recipientPostcode,
+      postcode: shipment.recipientPostcode,
       expeditionId: glsResult.expeditionId || undefined,
     });
 
     if (!isValidTrackingUrl(trackingUrl)) {
       throw new Error(
-        `Unable to build valid tracking URL for country=${input.recipientCountry}, ` +
-        `tracking=${glsResult.trackingNumber}, postcode=${input.recipientPostcode}, ` +
-        `expeditionId=${glsResult.expeditionId}`
+        `Unable to build valid tracking URL for country=${shipment.recipientCountry}, ` +
+        `tracking=${glsResult.trackingNumber}, postcode=${shipment.recipientPostcode}, ` +
+        `expeditionId=${glsResult.expeditionId}`,
       );
     }
 
-    // ── Create/update local shipment record ──────────────────
-    let shipment = repo.getShipmentByHoldedDocId(input.holdedDocumentId);
-
-    const shipmentData: Partial<Shipment> = {
-      holdedDocumentId: input.holdedDocumentId,
-      holdedDocType: docType,
-      recipientName: input.recipientName,
-      recipientAddress: input.recipientAddress,
-      recipientCity: input.recipientCity,
-      recipientPostcode: input.recipientPostcode,
-      recipientCountry: input.recipientCountry,
-      recipientPhone: input.recipientPhone,
-      recipientEmail: input.recipientEmail,
+    // ── Update local shipment record ─────────────────────────
+    let updated = repo.updateShipment(shipmentId, {
       trackingNumber: glsResult.trackingNumber,
       expeditionId: glsResult.expeditionId,
       labelPdfPath: labelPath,
+      glsRawResponse: redactGlsResponse(glsResult.rawResponse),
       trackingUrl,
       localStatus: 'LABELED',
-    };
-
-    if (shipment) {
-      shipment = repo.updateShipment(shipment.id, shipmentData)!;
-    } else {
-      shipment = repo.createShipment({
-        ...shipmentData,
-        holdedDocumentId: input.holdedDocumentId,
-      });
-    }
+    })!;
 
     // ── Step 3: Update Holded Seguimiento ────────────────────
     let trackingSynced = false;
     try {
       const holdedClient = getHoldedClient();
-      await holdedClient.updateTracking(docType, input.holdedDocumentId, trackingUrl);
-      shipment = repo.updateShipment(shipment.id, {
+      await holdedClient.updateTracking(docType, shipment.holdedDocumentId, trackingUrl);
+      updated = repo.updateShipment(shipmentId, {
         holdedTrackingSyncStatus: 'SYNCED',
         holdedTrackingSyncError: null,
       })!;
@@ -182,7 +178,7 @@ export async function generateLabel(input: LabelGenerationInput): Promise<LabelG
     } catch (err: any) {
       const errMsg = err?.message || String(err);
       errors.push(`Holded Seguimiento update failed: ${errMsg}`);
-      shipment = repo.updateShipment(shipment.id, {
+      updated = repo.updateShipment(shipmentId, {
         holdedTrackingSyncStatus: 'ERROR',
         holdedTrackingSyncError: errMsg,
       })!;
@@ -193,8 +189,8 @@ export async function generateLabel(input: LabelGenerationInput): Promise<LabelG
     let customFieldSynced = false;
     try {
       const holdedClient = getHoldedClient();
-      await holdedClient.updateCustomField(docType, input.holdedDocumentId, CUSTOM_FIELD_NAME, trackingUrl);
-      shipment = repo.updateShipment(shipment.id, {
+      await holdedClient.updateCustomField(docType, shipment.holdedDocumentId, CUSTOM_FIELD_NAME, trackingUrl);
+      updated = repo.updateShipment(shipmentId, {
         holdedCustomFieldSyncStatus: 'SYNCED',
         holdedCustomFieldSyncError: null,
       })!;
@@ -203,19 +199,19 @@ export async function generateLabel(input: LabelGenerationInput): Promise<LabelG
     } catch (err: any) {
       const errMsg = err?.message || String(err);
       errors.push(`Holded custom field update failed: ${errMsg}`);
-      shipment = repo.updateShipment(shipment.id, {
+      updated = repo.updateShipment(shipmentId, {
         holdedCustomFieldSyncStatus: 'ERROR',
         holdedCustomFieldSyncError: errMsg,
       })!;
       logger.error('Holded custom field update failed', { error: errMsg });
     }
 
-    // ── Step 5: Set Holded etapa (ONLY if steps 3+4 succeeded) ──
+    // ── Step 5: Set Holded etapa (ONLY if steps 3+4 succeeded)
     if (trackingSynced && customFieldSynced) {
       try {
         const holdedClient = getHoldedClient();
-        await holdedClient.setPipelineStage(docType, input.holdedDocumentId, SENT_STAGE_ID);
-        shipment = repo.updateShipment(shipment.id, {
+        await holdedClient.setPipelineStage(docType, shipment.holdedDocumentId, SENT_STAGE_ID);
+        updated = repo.updateShipment(shipmentId, {
           holdedStageSyncStatus: 'SYNCED',
           holdedStageSyncError: null,
           holdedStageIdLastSet: SENT_STAGE_ID,
@@ -225,23 +221,22 @@ export async function generateLabel(input: LabelGenerationInput): Promise<LabelG
       } catch (err: any) {
         const errMsg = err?.message || String(err);
         errors.push(`Holded pipeline stage set failed: ${errMsg}`);
-        shipment = repo.updateShipment(shipment.id, {
+        updated = repo.updateShipment(shipmentId, {
           holdedStageSyncStatus: 'ERROR',
           holdedStageSyncError: errMsg,
         })!;
         logger.error('Holded pipeline stage set failed', { error: errMsg });
       }
     } else {
-      // Don't set etapa if tracking or custom field failed
-      shipment = repo.updateShipment(shipment.id, {
+      updated = repo.updateShipment(shipmentId, {
         holdedStageSyncStatus: 'NOT_SYNCED',
         holdedStageSyncError: 'Skipped: tracking or custom field sync failed first',
       })!;
     }
 
-    return { shipment, errors };
+    return { shipment: repo.getShipmentById(shipmentId)!, errors };
   } finally {
-    releaseLock(input.holdedDocumentId);
+    releaseLock(shipment.holdedDocumentId);
   }
 }
 
@@ -255,11 +250,7 @@ export async function retryHoldedTrackingSync(shipmentId: string): Promise<Shipm
   const holdedClient = getHoldedClient();
 
   try {
-    await holdedClient.updateTracking(
-      shipment.holdedDocType,
-      shipment.holdedDocumentId,
-      shipment.trackingUrl,
-    );
+    await holdedClient.updateTracking(shipment.holdedDocType, shipment.holdedDocumentId, shipment.trackingUrl);
     return repo.updateShipment(shipmentId, {
       holdedTrackingSyncStatus: 'SYNCED',
       holdedTrackingSyncError: null,
@@ -281,12 +272,7 @@ export async function retryHoldedCustomFieldSync(shipmentId: string): Promise<Sh
   const holdedClient = getHoldedClient();
 
   try {
-    await holdedClient.updateCustomField(
-      shipment.holdedDocType,
-      shipment.holdedDocumentId,
-      CUSTOM_FIELD_NAME,
-      shipment.trackingUrl,
-    );
+    await holdedClient.updateCustomField(shipment.holdedDocType, shipment.holdedDocumentId, CUSTOM_FIELD_NAME, shipment.trackingUrl);
     return repo.updateShipment(shipmentId, {
       holdedCustomFieldSyncStatus: 'SYNCED',
       holdedCustomFieldSyncError: null,
@@ -304,7 +290,6 @@ export async function retryHoldedStageSync(shipmentId: string): Promise<Shipment
   const shipment = repo.getShipmentById(shipmentId);
   if (!shipment) throw new Error(`Shipment ${shipmentId} not found`);
 
-  // Stage should only be set if tracking + custom field are synced
   if (shipment.holdedTrackingSyncStatus !== 'SYNCED') {
     throw new Error('Cannot set etapa: Holded Seguimiento not synced. Retry tracking first.');
   }
@@ -315,11 +300,7 @@ export async function retryHoldedStageSync(shipmentId: string): Promise<Shipment
   const holdedClient = getHoldedClient();
 
   try {
-    await holdedClient.setPipelineStage(
-      shipment.holdedDocType,
-      shipment.holdedDocumentId,
-      SENT_STAGE_ID,
-    );
+    await holdedClient.setPipelineStage(shipment.holdedDocType, shipment.holdedDocumentId, SENT_STAGE_ID);
     return repo.updateShipment(shipmentId, {
       holdedStageSyncStatus: 'SYNCED',
       holdedStageSyncError: null,
@@ -335,43 +316,27 @@ export async function retryHoldedStageSync(shipmentId: string): Promise<Shipment
   }
 }
 
-/**
- * Retry all failed Holded sync steps in order.
- * Returns the updated shipment and a list of errors from this attempt.
- */
 export async function retryAllHoldedSync(shipmentId: string): Promise<{ shipment: Shipment; errors: string[] }> {
   let shipment = repo.getShipmentById(shipmentId);
   if (!shipment) throw new Error(`Shipment ${shipmentId} not found`);
 
   const errors: string[] = [];
 
-  // Step 1: Retry tracking if needed
   if (shipment.holdedTrackingSyncStatus !== 'SYNCED') {
-    try {
-      shipment = await retryHoldedTrackingSync(shipmentId);
-    } catch (err: any) {
-      errors.push(`Tracking sync: ${err.message}`);
-    }
+    try { shipment = await retryHoldedTrackingSync(shipmentId); }
+    catch (err: any) { errors.push(`Tracking sync: ${err.message}`); }
   }
 
-  // Step 2: Retry custom field if needed
   shipment = repo.getShipmentById(shipmentId)!;
   if (shipment.holdedCustomFieldSyncStatus !== 'SYNCED') {
-    try {
-      shipment = await retryHoldedCustomFieldSync(shipmentId);
-    } catch (err: any) {
-      errors.push(`Custom field sync: ${err.message}`);
-    }
+    try { shipment = await retryHoldedCustomFieldSync(shipmentId); }
+    catch (err: any) { errors.push(`Custom field sync: ${err.message}`); }
   }
 
-  // Step 3: Retry stage if needed (only if both above are synced)
   shipment = repo.getShipmentById(shipmentId)!;
   if (shipment.holdedStageSyncStatus !== 'SYNCED') {
-    try {
-      shipment = await retryHoldedStageSync(shipmentId);
-    } catch (err: any) {
-      errors.push(`Stage sync: ${err.message}`);
-    }
+    try { shipment = await retryHoldedStageSync(shipmentId); }
+    catch (err: any) { errors.push(`Stage sync: ${err.message}`); }
   }
 
   return { shipment: repo.getShipmentById(shipmentId)!, errors };
@@ -379,50 +344,34 @@ export async function retryAllHoldedSync(shipmentId: string): Promise<{ shipment
 
 // ── Delete / cancel tracking ─────────────────────────────────────
 
-/**
- * Delete tracking:
- *  1) Clear Holded Seguimiento
- *  2) Clear custom field "Seguimiento de Envio"
- *  3) Leave etapa untouched (documented choice: the pipeline stage is
- *     informational history; clearing it could lose audit trail)
- *  4) Clear local tracking fields
- */
 export async function deleteTracking(shipmentId: string): Promise<Shipment> {
   const shipment = repo.getShipmentById(shipmentId);
   if (!shipment) throw new Error(`Shipment ${shipmentId} not found`);
 
   const holdedClient = getHoldedClient();
 
-  // Step 1: Clear Holded Seguimiento
   try {
     await holdedClient.clearTracking(shipment.holdedDocType, shipment.holdedDocumentId);
     logger.info('Holded Seguimiento cleared', { shipmentId });
   } catch (err: any) {
-    logger.error('Failed to clear Holded Seguimiento', { error: err.message });
     throw new Error(`Failed to clear Holded Seguimiento: ${err.message}`);
   }
 
-  // Step 2: Clear custom field
   try {
-    await holdedClient.clearCustomField(
-      shipment.holdedDocType,
-      shipment.holdedDocumentId,
-      CUSTOM_FIELD_NAME,
-    );
+    await holdedClient.clearCustomField(shipment.holdedDocType, shipment.holdedDocumentId, CUSTOM_FIELD_NAME);
     logger.info('Holded custom field cleared', { field: CUSTOM_FIELD_NAME, shipmentId });
   } catch (err: any) {
-    logger.error('Failed to clear Holded custom field', { error: err.message });
     throw new Error(`Failed to clear Holded custom field: ${err.message}`);
   }
 
-  // Step 3: Etapa left untouched — documented choice (see docs/INTEGRATIONS.md)
+  // Etapa left untouched — documented choice (audit trail)
 
-  // Step 4: Clear local tracking fields
   return repo.updateShipment(shipmentId, {
     trackingNumber: null,
     expeditionId: null,
     trackingUrl: null,
     labelPdfPath: null,
+    glsRawResponse: null,
     holdedTrackingSyncStatus: 'NOT_SYNCED',
     holdedTrackingSyncError: null,
     holdedCustomFieldSyncStatus: 'NOT_SYNCED',
@@ -436,66 +385,59 @@ export async function deleteTracking(shipmentId: string): Promise<Shipment> {
 
 // ── Regenerate label ─────────────────────────────────────────────
 
-/**
- * Regenerate label:
- *  1) Clear Holded Seguimiento + custom field
- *  2) Create new GLS shipment → new trackingNumber
- *  3) Build trackingUrl → update Holded Seguimiento → update custom field → set etapa
- *  4) Idempotency via lock prevents double-click duplicates
- */
-export async function regenerateLabel(input: LabelGenerationInput): Promise<LabelGenerationResult> {
-  const existing = repo.getShipmentByHoldedDocId(input.holdedDocumentId);
+export async function regenerateLabel(shipmentId: string): Promise<LabelGenerationResult> {
+  const existing = repo.getShipmentById(shipmentId);
+  if (!existing) throw new Error(`Shipment ${shipmentId} not found`);
 
-  if (existing) {
-    const holdedClient = getHoldedClient();
-    const docType = existing.holdedDocType;
+  const holdedClient = getHoldedClient();
 
-    // Clear Holded tracking fields first (best-effort)
+  try { await holdedClient.clearTracking(existing.holdedDocType, existing.holdedDocumentId); }
+  catch (err: any) { logger.warn('Failed to clear Holded tracking before regenerate', { error: err.message }); }
+
+  try { await holdedClient.clearCustomField(existing.holdedDocType, existing.holdedDocumentId, CUSTOM_FIELD_NAME); }
+  catch (err: any) { logger.warn('Failed to clear Holded custom field before regenerate', { error: err.message }); }
+
+  repo.updateShipment(shipmentId, {
+    trackingNumber: null, expeditionId: null, trackingUrl: null,
+    labelPdfPath: null, glsRawResponse: null,
+    holdedTrackingSyncStatus: 'NOT_SYNCED', holdedTrackingSyncError: null,
+    holdedCustomFieldSyncStatus: 'NOT_SYNCED', holdedCustomFieldSyncError: null,
+    holdedStageSyncStatus: 'NOT_SYNCED', holdedStageSyncError: null,
+    holdedStageIdLastSet: null, localStatus: 'PENDING',
+  });
+
+  return generateLabel(shipmentId);
+}
+
+// ── Bulk label generation ────────────────────────────────────────
+
+export interface BulkResult {
+  shipmentId: string;
+  waybillNumber: string;
+  success: boolean;
+  errors: string[];
+}
+
+export async function generateLabelsBulk(shipmentIds: string[]): Promise<BulkResult[]> {
+  const results: BulkResult[] = [];
+
+  for (const id of shipmentIds) {
+    const shipment = repo.getShipmentById(id);
+    const waybillNumber = shipment?.waybillNumber || id;
+
     try {
-      await holdedClient.clearTracking(docType, input.holdedDocumentId);
+      const result = await generateLabel(id);
+      results.push({ shipmentId: id, waybillNumber, success: result.errors.length === 0, errors: result.errors });
     } catch (err: any) {
-      logger.warn('Failed to clear Holded tracking before regenerate', { error: err.message });
+      results.push({ shipmentId: id, waybillNumber, success: false, errors: [err.message] });
     }
-
-    try {
-      await holdedClient.clearCustomField(docType, input.holdedDocumentId, CUSTOM_FIELD_NAME);
-    } catch (err: any) {
-      logger.warn('Failed to clear Holded custom field before regenerate', { error: err.message });
-    }
-
-    // Reset local sync statuses
-    repo.updateShipment(existing.id, {
-      trackingNumber: null,
-      expeditionId: null,
-      trackingUrl: null,
-      labelPdfPath: null,
-      holdedTrackingSyncStatus: 'NOT_SYNCED',
-      holdedTrackingSyncError: null,
-      holdedCustomFieldSyncStatus: 'NOT_SYNCED',
-      holdedCustomFieldSyncError: null,
-      holdedStageSyncStatus: 'NOT_SYNCED',
-      holdedStageSyncError: null,
-      holdedStageIdLastSet: null,
-      localStatus: 'PENDING',
-    });
   }
 
-  // Run the full label generation pipeline (will create new GLS shipment)
-  return generateLabel(input);
+  return results;
 }
 
 // ── Sync waybills from Holded ────────────────────────────────────
 
-/**
- * Fetch waybills from Holded that are eligible for processing.
- *
- * Per the new workflow, waybills arrive as "Accepted" by default.
- * We look for documents that:
- *  - Are in Accepted status
- *  - Have NOT been sent by API yet (no etapa "🛻 => Enviado por API GLS")
- *
- * There is NO "Pending → Accepted" transition.
- */
 export async function syncWaybillsFromHolded(): Promise<Shipment[]> {
   const holdedClient = getHoldedClient();
   const docs = await holdedClient.listDocuments('waybill');
@@ -503,35 +445,32 @@ export async function syncWaybillsFromHolded(): Promise<Shipment[]> {
   const synced: Shipment[] = [];
 
   for (const doc of docs) {
-    // Skip documents that already have the "Sent by API GLS" stage
     if (doc.pipeline?.stageId === SENT_STAGE_ID) continue;
 
-    // Skip documents we've already fully processed
     const existing = repo.getShipmentByHoldedDocId(doc.id);
     if (existing && existing.localStatus === 'SENT_BY_API') continue;
 
-    // Extract shipping address
-    const addr = doc.shippingAddress || {};
+    const addr = doc.shippingAddress || doc.billingAddress || {};
 
     const shipmentData: Partial<Shipment> = {
       holdedDocumentId: doc.id,
       holdedDocType: 'waybill',
+      waybillNumber: doc.docNumber || '',
       recipientName: doc.contactName || '',
+      recipientCommercialName: doc.contactTradeName || '',
       recipientAddress: addr.address || '',
       recipientCity: addr.city || '',
+      recipientProvince: addr.province || '',
       recipientPostcode: addr.postalCode || '',
       recipientCountry: addr.countryCode || addr.country || '',
-      recipientPhone: '',
-      recipientEmail: '',
+      recipientPhone: doc.phone || '',
+      recipientEmail: doc.email || '',
     };
 
     if (existing) {
       synced.push(repo.updateShipment(existing.id, shipmentData)!);
     } else {
-      synced.push(repo.createShipment({
-        ...shipmentData,
-        holdedDocumentId: doc.id,
-      }));
+      synced.push(repo.createShipment({ ...shipmentData, holdedDocumentId: doc.id }));
     }
   }
 

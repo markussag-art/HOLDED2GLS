@@ -18,28 +18,16 @@
   </header>
 
   <main class="container">
+    <!-- Sender info bar -->
+    <div id="sender-bar" class="sender-bar" style="display:none"></div>
+
     <!-- Stats -->
     <div class="stats" id="stats">
-      <div class="stat-card">
-        <div class="label">Total</div>
-        <div class="value" id="stat-total">0</div>
-      </div>
-      <div class="stat-card">
-        <div class="label">Pending</div>
-        <div class="value" id="stat-pending">0</div>
-      </div>
-      <div class="stat-card">
-        <div class="label">Labeled</div>
-        <div class="value" id="stat-labeled">0</div>
-      </div>
-      <div class="stat-card">
-        <div class="label">Sent by API</div>
-        <div class="value" id="stat-sent">0</div>
-      </div>
-      <div class="stat-card">
-        <div class="label">Sync Errors</div>
-        <div class="value" id="stat-errors">0</div>
-      </div>
+      <div class="stat-card"><div class="label">Total</div><div class="value" id="stat-total">0</div></div>
+      <div class="stat-card"><div class="label">Pending</div><div class="value" id="stat-pending">0</div></div>
+      <div class="stat-card"><div class="label">Labeled</div><div class="value" id="stat-labeled">0</div></div>
+      <div class="stat-card"><div class="label">Sent by API</div><div class="value" id="stat-sent">0</div></div>
+      <div class="stat-card"><div class="label">Sync Errors</div><div class="value" id="stat-errors">0</div></div>
     </div>
 
     <!-- Shipments table -->
@@ -47,9 +35,10 @@
       <table>
         <thead>
           <tr>
-            <th>Document</th>
+            <th>Waybill</th>
             <th>Recipient</th>
             <th>Country</th>
+            <th>Shipping</th>
             <th>Tracking</th>
             <th>Status</th>
             <th>Holded Sync</th>
@@ -58,17 +47,22 @@
           </tr>
         </thead>
         <tbody id="shipments-body">
-          <tr>
-            <td colspan="8">
-              <div class="empty-state">
-                <p>No shipments found. Click <strong>Sync Waybills</strong> to fetch from Holded.</p>
-              </div>
-            </td>
-          </tr>
+          <tr><td colspan="9"><div class="empty-state"><p>No shipments. Click <strong>Sync Waybills</strong> to fetch from Holded.</p></div></td></tr>
         </tbody>
       </table>
     </div>
   </main>
+
+  <!-- Detail modal -->
+  <div class="modal-overlay" id="detail-modal" style="display:none" onclick="if(event.target===this)closeDetail()">
+    <div class="modal">
+      <div class="modal-header">
+        <h2 id="detail-title">Shipment Detail</h2>
+        <button class="btn btn-sm" onclick="closeDetail()">&times;</button>
+      </div>
+      <div class="modal-body" id="detail-body"></div>
+    </div>
+  </div>
 
   <div class="toast-container" id="toast-container"></div>
 

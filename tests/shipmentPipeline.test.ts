@@ -13,12 +13,14 @@
  *  - Retry logic works for individual sync steps
  */
 
-import { initDb, getDb, closeDb } from '../src/models/database';
+import { initDb, closeDb } from '../src/models/database';
 import * as repo from '../src/models/shipmentRepository';
 import * as service from '../src/services/shipmentService';
 import { setHoldedClient, HoldedClient } from '../src/clients/holdedClient';
 import { setGlsClient, GlsClient } from '../src/clients/glsClient';
 import { buildTrackingUrl, isValidTrackingUrl } from '../src/utils/tracking';
+import { config } from '../src/utils/config';
+import { Shipment } from '../src/models/shipment';
 
 // ── Mock setup ───────────────────────────────────────────────────
 
@@ -84,43 +86,48 @@ function createMockGlsClient(overrides: Partial<Record<string, Function>> = {}):
   return mock;
 }
 
-const baseLabelInput: service.LabelGenerationInput = {
-  holdedDocumentId: 'holded_doc_001',
-  holdedDocType: 'waybill',
-  senderName: 'Test Sender',
-  senderAddress: 'Sender St 1',
-  senderCity: 'Madrid',
-  senderPostcode: '28001',
-  senderCountry: 'ES',
-  senderPhone: '600000000',
-  recipientName: 'Test Recipient',
-  recipientAddress: 'Recipient Ave 5',
-  recipientCity: 'Barcelona',
-  recipientPostcode: '08001',
-  recipientCountry: 'ES',
-  recipientPhone: '611111111',
-  recipientEmail: 'test@example.com',
-  weight: 2,
-  packages: 1,
-  reference: 'REF-001',
-};
+/**
+ * Helper: create a shipment in the DB and return it.
+ * The service's generateLabel now takes a shipmentId and
+ * looks it up from the database.
+ */
+function createTestShipment(overrides: Partial<Shipment> = {}): Shipment {
+  return repo.createShipment({
+    holdedDocumentId: overrides.holdedDocumentId || 'holded_doc_001',
+    holdedDocType: overrides.holdedDocType || 'waybill',
+    waybillNumber: overrides.waybillNumber || 'A250001',
+    recipientName: overrides.recipientName || 'Test Recipient',
+    recipientCommercialName: overrides.recipientCommercialName || '',
+    recipientAddress: overrides.recipientAddress || 'Recipient Ave 5',
+    recipientCity: overrides.recipientCity || 'Barcelona',
+    recipientProvince: overrides.recipientProvince || 'Barcelona',
+    recipientPostcode: overrides.recipientPostcode || '08001',
+    recipientCountry: overrides.recipientCountry || 'ES',
+    recipientPhone: overrides.recipientPhone || '611111111',
+    recipientEmail: overrides.recipientEmail || 'test@example.com',
+    weight: overrides.weight ?? 2,
+    packages: overrides.packages ?? 1,
+    shippingMethod: overrides.shippingMethod || 'COURIER_EXPRESS_19',
+    deliveryNotes: overrides.deliveryNotes || '',
+    ...overrides,
+  });
+}
 
 // ── Test lifecycle ───────────────────────────────────────────────
 
 beforeEach(() => {
-  // Use in-memory DB for tests
-  process.env.DB_PATH = ':memory:';
-  // Re-init the config path won't matter since we use getDb directly
-  // We need to close and reinit the DB for each test
-  closeDb();
-  initDb();
+  // Override config to use in-memory DB (config is evaluated at import time,
+  // so setting process.env after import doesn't help)
+  (config as any).db = { path: ':memory:' };
 
-  // Set up mock data dir
   const fs = require('fs');
   const path = require('path');
   const tmpDir = path.join(__dirname, '../.test-labels');
   if (!fs.existsSync(tmpDir)) fs.mkdirSync(tmpDir, { recursive: true });
-  process.env.LABELS_DIR = tmpDir;
+  (config as any).labels = { dir: tmpDir };
+
+  closeDb();
+  initDb();
 });
 
 afterEach(() => {
@@ -184,7 +191,8 @@ describe('Label generation pipeline (ES shipment)', () => {
     setHoldedClient(mockHolded);
     setGlsClient(mockGls);
 
-    const result = await service.generateLabel(baseLabelInput);
+    const shipment = createTestShipment({ holdedDocumentId: 'holded_doc_001' });
+    const result = await service.generateLabel(shipment.id);
 
     expect(result.errors).toHaveLength(0);
 
@@ -225,10 +233,8 @@ describe('Label generation pipeline (ES shipment)', () => {
     setHoldedClient(mockHolded);
     setGlsClient(mockGls);
 
-    const result = await service.generateLabel({
-      ...baseLabelInput,
-      holdedDocumentId: 'holded_doc_002',
-    });
+    const shipment = createTestShipment({ holdedDocumentId: 'holded_doc_002' });
+    const result = await service.generateLabel(shipment.id);
 
     expect(result.errors.length).toBeGreaterThan(0);
     expect(result.shipment.trackingNumber).toBe('TRK123456');
@@ -245,10 +251,8 @@ describe('Label generation pipeline (ES shipment)', () => {
     setHoldedClient(mockHolded);
     setGlsClient(mockGls);
 
-    const result = await service.generateLabel({
-      ...baseLabelInput,
-      holdedDocumentId: 'holded_doc_003',
-    });
+    const shipment = createTestShipment({ holdedDocumentId: 'holded_doc_003' });
+    const result = await service.generateLabel(shipment.id);
 
     expect(result.shipment.holdedTrackingSyncStatus).toBe('SYNCED');
     expect(result.shipment.holdedCustomFieldSyncStatus).toBe('ERROR');
@@ -263,10 +267,8 @@ describe('Label generation pipeline (ES shipment)', () => {
     setHoldedClient(mockHolded);
     setGlsClient(mockGls);
 
-    const result = await service.generateLabel({
-      ...baseLabelInput,
-      holdedDocumentId: 'holded_doc_004',
-    });
+    const shipment = createTestShipment({ holdedDocumentId: 'holded_doc_004' });
+    const result = await service.generateLabel(shipment.id);
 
     expect(result.shipment.holdedTrackingSyncStatus).toBe('SYNCED');
     expect(result.shipment.holdedCustomFieldSyncStatus).toBe('SYNCED');
@@ -289,14 +291,13 @@ describe('Label generation pipeline (PT shipment)', () => {
     setHoldedClient(mockHolded);
     setGlsClient(mockGls);
 
-    const ptInput = {
-      ...baseLabelInput,
+    const shipment = createTestShipment({
       holdedDocumentId: 'holded_doc_pt_001',
       recipientCountry: 'PT',
       recipientPostcode: '1000-001',
-    };
+    });
 
-    const result = await service.generateLabel(ptInput);
+    const result = await service.generateLabel(shipment.id);
 
     expect(result.shipment.trackingUrl).toBe('https://mygls.gls-spain.es/expedition/exp-uuid-abc-123');
     expect(result.shipment.expeditionId).toBe('exp-uuid-abc-123');
@@ -310,16 +311,14 @@ describe('Label generation pipeline (PT shipment)', () => {
 
 describe('Delete tracking', () => {
   test('clears Holded Seguimiento, custom field, and local fields', async () => {
-    // First create a shipment
+    // First create a shipment and generate label
     const mockHolded = createMockHoldedClient();
     const mockGls = createMockGlsClient();
     setHoldedClient(mockHolded);
     setGlsClient(mockGls);
 
-    const genResult = await service.generateLabel({
-      ...baseLabelInput,
-      holdedDocumentId: 'holded_doc_del_001',
-    });
+    const shipment = createTestShipment({ holdedDocumentId: 'holded_doc_del_001' });
+    const genResult = await service.generateLabel(shipment.id);
 
     holdedCalls = []; // reset call tracking
 
@@ -364,18 +363,13 @@ describe('Regenerate label', () => {
     setHoldedClient(mockHolded);
     setGlsClient(mockGls);
 
-    await service.generateLabel({
-      ...baseLabelInput,
-      holdedDocumentId: 'holded_doc_regen_001',
-    });
+    const shipment = createTestShipment({ holdedDocumentId: 'holded_doc_regen_001' });
+    await service.generateLabel(shipment.id);
 
     holdedCalls = [];
 
     // Regenerate
-    const result = await service.regenerateLabel({
-      ...baseLabelInput,
-      holdedDocumentId: 'holded_doc_regen_001',
-    });
+    const result = await service.regenerateLabel(shipment.id);
 
     // Should have new tracking number
     expect(result.shipment.trackingNumber).toBe('TRK_REGEN_2');
@@ -404,10 +398,8 @@ describe('Retry Holded sync', () => {
     setHoldedClient(mockHolded);
     setGlsClient(mockGls);
 
-    const genResult = await service.generateLabel({
-      ...baseLabelInput,
-      holdedDocumentId: 'holded_doc_retry_001',
-    });
+    const shipment = createTestShipment({ holdedDocumentId: 'holded_doc_retry_001' });
+    const genResult = await service.generateLabel(shipment.id);
 
     expect(genResult.shipment.holdedTrackingSyncStatus).toBe('ERROR');
 
@@ -432,10 +424,8 @@ describe('Retry Holded sync', () => {
     setHoldedClient(mockHolded);
     setGlsClient(mockGls);
 
-    const genResult = await service.generateLabel({
-      ...baseLabelInput,
-      holdedDocumentId: 'holded_doc_retry_002',
-    });
+    const shipment = createTestShipment({ holdedDocumentId: 'holded_doc_retry_002' });
+    const genResult = await service.generateLabel(shipment.id);
 
     // Try to set stage — should fail because tracking isn't synced
     await expect(

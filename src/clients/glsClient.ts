@@ -1,11 +1,12 @@
 import * as soap from 'soap';
 import { config } from '../utils/config';
 import { logger } from '../utils/logger';
+import { SHIPPING_METHODS, ShippingMethod } from '../models/shipment';
 
 /**
  * GLS (ASM) SOAP client for creating shipments and retrieving labels.
  *
- * Uses the B2B WSDL endpoint.
+ * Uses the B2B WSDL endpoint: https://wsclientes.asmred.com/b2b.asmx?wsdl
  */
 
 export interface GlsShipmentRequest {
@@ -15,8 +16,10 @@ export interface GlsShipmentRequest {
   senderPostcode: string;
   senderCountry: string;
   senderPhone: string;
+  senderTaxId: string;
 
-  recipientName: string;
+  recipientName: string;           // Commercial name preferred on label
+  recipientContactName: string;    // Person name
   recipientAddress: string;
   recipientCity: string;
   recipientPostcode: string;
@@ -26,8 +29,9 @@ export interface GlsShipmentRequest {
 
   weight: number;       // kg
   packages: number;
-  reference: string;    // e.g. waybill number
-  notes?: string;
+  shippingMethod: ShippingMethod;
+  reference: string;    // "Ref. Cli. Albaran <waybillNumber>"
+  notes?: string;       // delivery notes
 }
 
 export interface GlsShipmentResponse {
@@ -35,6 +39,21 @@ export interface GlsShipmentResponse {
   expeditionId: string | null;   // present for PT shipments
   labelBase64: string;           // PDF label in base64
   rawResponse: unknown;
+}
+
+/**
+ * Redact sensitive fields from raw GLS response for safe storage.
+ */
+export function redactGlsResponse(raw: unknown): string {
+  try {
+    const snapshot = JSON.parse(JSON.stringify(raw));
+    delete snapshot?.uidcliente;
+    delete snapshot?.codigo_cliente;
+    delete snapshot?.password;
+    return JSON.stringify(snapshot);
+  } catch {
+    return '{"error":"unable to serialize response"}';
+  }
 }
 
 export class GlsClient {
@@ -55,8 +74,12 @@ export class GlsClient {
   async createShipment(req: GlsShipmentRequest): Promise<GlsShipmentResponse> {
     const client = await this.getClient();
 
+    // Map shipping method to GLS service code
+    const methodDef = SHIPPING_METHODS.find(m => m.code === req.shippingMethod);
+    const serviceCode = methodDef?.glsServiceCode || '1';
+
     const soapBody = {
-      GrабarEnvio: {
+      GrabarEnvio: {
         uidcliente: config.gls.uid,
         codigo_cliente: config.gls.clientCode,
         // Sender
@@ -67,8 +90,10 @@ export class GlsClient {
         cp_remitente: req.senderPostcode,
         pais_remitente: req.senderCountry,
         telefono_remitente: req.senderPhone,
-        // Recipient
+        nif_remitente: req.senderTaxId,
+        // Recipient — commercial name as primary, contact as secondary
         nombre_destinatario: req.recipientName,
+        nombre2_destinatario: req.recipientContactName,
         direccion_destinatario: req.recipientAddress,
         poblacion_destinatario: req.recipientCity,
         cp_destinatario: req.recipientPostcode,
@@ -80,10 +105,12 @@ export class GlsClient {
         bultos: req.packages.toString(),
         referencia: req.reference,
         observaciones: req.notes || '',
+        // Service
+        servicio: serviceCode,
       },
     };
 
-    logger.debug('GLS SOAP createShipment', { reference: req.reference });
+    logger.debug('GLS SOAP createShipment', { reference: req.reference, service: serviceCode });
 
     try {
       const [result] = await client.GrabarEnvioAsync(soapBody);
@@ -132,7 +159,6 @@ export class GlsClient {
   }
 
   private extractTrackingNumber(response: any): string {
-    // GLS returns tracking number in various fields depending on version
     return (
       response?.Seguimiento ||
       response?.CodigoBarras ||
@@ -143,7 +169,6 @@ export class GlsClient {
   }
 
   private extractExpeditionId(response: any): string | null {
-    // For PT shipments, the expedition UUID is returned
     return (
       response?.ExpeditionId ||
       response?.expedition_id ||

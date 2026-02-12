@@ -28,18 +28,27 @@ export function initDb(): void {
       id                          TEXT PRIMARY KEY,
       holdedDocumentId            TEXT NOT NULL,
       holdedDocType               TEXT NOT NULL DEFAULT 'waybill',
+      waybillNumber               TEXT NOT NULL DEFAULT '',
 
       recipientName               TEXT NOT NULL DEFAULT '',
+      recipientCommercialName     TEXT NOT NULL DEFAULT '',
       recipientAddress            TEXT NOT NULL DEFAULT '',
       recipientCity               TEXT NOT NULL DEFAULT '',
+      recipientProvince           TEXT NOT NULL DEFAULT '',
       recipientPostcode           TEXT NOT NULL DEFAULT '',
       recipientCountry            TEXT NOT NULL DEFAULT '',
       recipientPhone              TEXT NOT NULL DEFAULT '',
       recipientEmail              TEXT NOT NULL DEFAULT '',
 
+      weight                      REAL NOT NULL DEFAULT 1,
+      packages                    INTEGER NOT NULL DEFAULT 1,
+      shippingMethod              TEXT NOT NULL DEFAULT '',
+      deliveryNotes               TEXT NOT NULL DEFAULT '',
+
       trackingNumber              TEXT,
       expeditionId                TEXT,
       labelPdfPath                TEXT,
+      glsRawResponse              TEXT,
       trackingUrl                 TEXT,
 
       holdedTrackingSyncStatus    TEXT NOT NULL DEFAULT 'NOT_SYNCED',

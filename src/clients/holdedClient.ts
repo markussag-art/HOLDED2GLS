@@ -163,10 +163,14 @@ export interface HoldedDocument {
   status?: string;
   contact?: string;
   contactName?: string;
+  contactTradeName?: string;      // "razón social" / commercial name
   shippingAddress?: HoldedAddress;
+  billingAddress?: HoldedAddress;
   customFields?: HoldedCustomFieldEntry[];
   customFieldsDef?: HoldedCustomFieldDef[];
   pipeline?: { stageId?: string };
+  phone?: string;
+  email?: string;
   [key: string]: unknown;
 }
 

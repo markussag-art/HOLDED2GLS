@@ -1,7 +1,9 @@
 import { Router, Request, Response } from 'express';
 import * as repo from '../models/shipmentRepository';
 import * as service from '../services/shipmentService';
+import { SHIPPING_METHODS } from '../models/shipment';
 import { logger } from '../utils/logger';
+import { config } from '../utils/config';
 
 const router = Router();
 
@@ -30,6 +32,16 @@ router.get('/shipments/:id', (req: Request, res: Response) => {
   }
 });
 
+// ── Config info (sender defaults, shipping methods) ──────────────
+
+router.get('/config', (_req: Request, res: Response) => {
+  res.json({
+    sender: config.sender,
+    shippingMethods: SHIPPING_METHODS,
+    holdedSentStageId: config.holdedSentStageId,
+  });
+});
+
 // ── Sync waybills from Holded ────────────────────────────────────
 
 router.post('/shipments/sync', async (_req: Request, res: Response) => {
@@ -42,36 +54,51 @@ router.post('/shipments/sync', async (_req: Request, res: Response) => {
   }
 });
 
+// ── Bulk generate labels ─────────────────────────────────────────
+
+router.post('/shipments/bulk-generate', async (req: Request, res: Response) => {
+  try {
+    const { shipmentIds } = req.body;
+    if (!Array.isArray(shipmentIds) || shipmentIds.length === 0) {
+      return res.status(400).json({ error: 'shipmentIds array required' });
+    }
+    const results = await service.generateLabelsBulk(shipmentIds);
+    res.json({ results });
+  } catch (err: any) {
+    logger.error('POST /bulk-generate failed', { error: err.message });
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// ── Update shipment params ───────────────────────────────────────
+
+router.put('/shipments/:id/params', (req: Request, res: Response) => {
+  try {
+    const shipment = service.updateShipmentParams(req.params.id, req.body);
+    res.json(shipment);
+  } catch (err: any) {
+    logger.error('PUT /shipments/:id/params failed', { error: err.message });
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// ── Preflight check ──────────────────────────────────────────────
+
+router.get('/shipments/:id/preflight', (req: Request, res: Response) => {
+  try {
+    const issues = service.preflightCheck(req.params.id);
+    res.json({ ok: issues.length === 0, issues });
+  } catch (err: any) {
+    logger.error('GET /preflight failed', { error: err.message });
+    res.status(500).json({ error: err.message });
+  }
+});
+
 // ── Generate label ───────────────────────────────────────────────
 
 router.post('/shipments/:id/generate-label', async (req: Request, res: Response) => {
   try {
-    const shipment = repo.getShipmentById(req.params.id);
-    if (!shipment) return res.status(404).json({ error: 'Shipment not found' });
-
-    // Merge stored shipment data with any overrides from body
-    const input: service.LabelGenerationInput = {
-      holdedDocumentId: shipment.holdedDocumentId,
-      holdedDocType: shipment.holdedDocType,
-      senderName: req.body.senderName || '',
-      senderAddress: req.body.senderAddress || '',
-      senderCity: req.body.senderCity || '',
-      senderPostcode: req.body.senderPostcode || '',
-      senderCountry: req.body.senderCountry || 'ES',
-      senderPhone: req.body.senderPhone || '',
-      recipientName: shipment.recipientName,
-      recipientAddress: shipment.recipientAddress,
-      recipientCity: shipment.recipientCity,
-      recipientPostcode: shipment.recipientPostcode,
-      recipientCountry: shipment.recipientCountry,
-      recipientPhone: shipment.recipientPhone,
-      recipientEmail: shipment.recipientEmail,
-      weight: req.body.weight || 1,
-      packages: req.body.packages || 1,
-      reference: req.body.reference || shipment.holdedDocumentId,
-    };
-
-    const result = await service.generateLabel(input);
+    const result = await service.generateLabel(req.params.id);
     res.json(result);
   } catch (err: any) {
     logger.error('POST /shipments/:id/generate-label failed', { error: err.message });
@@ -83,31 +110,7 @@ router.post('/shipments/:id/generate-label', async (req: Request, res: Response)
 
 router.post('/shipments/:id/regenerate-label', async (req: Request, res: Response) => {
   try {
-    const shipment = repo.getShipmentById(req.params.id);
-    if (!shipment) return res.status(404).json({ error: 'Shipment not found' });
-
-    const input: service.LabelGenerationInput = {
-      holdedDocumentId: shipment.holdedDocumentId,
-      holdedDocType: shipment.holdedDocType,
-      senderName: req.body.senderName || '',
-      senderAddress: req.body.senderAddress || '',
-      senderCity: req.body.senderCity || '',
-      senderPostcode: req.body.senderPostcode || '',
-      senderCountry: req.body.senderCountry || 'ES',
-      senderPhone: req.body.senderPhone || '',
-      recipientName: shipment.recipientName,
-      recipientAddress: shipment.recipientAddress,
-      recipientCity: shipment.recipientCity,
-      recipientPostcode: shipment.recipientPostcode,
-      recipientCountry: shipment.recipientCountry,
-      recipientPhone: shipment.recipientPhone,
-      recipientEmail: shipment.recipientEmail,
-      weight: req.body.weight || 1,
-      packages: req.body.packages || 1,
-      reference: req.body.reference || shipment.holdedDocumentId,
-    };
-
-    const result = await service.regenerateLabel(input);
+    const result = await service.regenerateLabel(req.params.id);
     res.json(result);
   } catch (err: any) {
     logger.error('POST /shipments/:id/regenerate-label failed', { error: err.message });
@@ -130,43 +133,23 @@ router.post('/shipments/:id/delete-tracking', async (req: Request, res: Response
 // ── Retry Holded sync ────────────────────────────────────────────
 
 router.post('/shipments/:id/retry-tracking-sync', async (req: Request, res: Response) => {
-  try {
-    const shipment = await service.retryHoldedTrackingSync(req.params.id);
-    res.json(shipment);
-  } catch (err: any) {
-    logger.error('POST /retry-tracking-sync failed', { error: err.message });
-    res.status(500).json({ error: err.message });
-  }
+  try { res.json(await service.retryHoldedTrackingSync(req.params.id)); }
+  catch (err: any) { res.status(500).json({ error: err.message }); }
 });
 
 router.post('/shipments/:id/retry-custom-field-sync', async (req: Request, res: Response) => {
-  try {
-    const shipment = await service.retryHoldedCustomFieldSync(req.params.id);
-    res.json(shipment);
-  } catch (err: any) {
-    logger.error('POST /retry-custom-field-sync failed', { error: err.message });
-    res.status(500).json({ error: err.message });
-  }
+  try { res.json(await service.retryHoldedCustomFieldSync(req.params.id)); }
+  catch (err: any) { res.status(500).json({ error: err.message }); }
 });
 
 router.post('/shipments/:id/retry-stage-sync', async (req: Request, res: Response) => {
-  try {
-    const shipment = await service.retryHoldedStageSync(req.params.id);
-    res.json(shipment);
-  } catch (err: any) {
-    logger.error('POST /retry-stage-sync failed', { error: err.message });
-    res.status(500).json({ error: err.message });
-  }
+  try { res.json(await service.retryHoldedStageSync(req.params.id)); }
+  catch (err: any) { res.status(500).json({ error: err.message }); }
 });
 
 router.post('/shipments/:id/retry-all-sync', async (req: Request, res: Response) => {
-  try {
-    const result = await service.retryAllHoldedSync(req.params.id);
-    res.json(result);
-  } catch (err: any) {
-    logger.error('POST /retry-all-sync failed', { error: err.message });
-    res.status(500).json({ error: err.message });
-  }
+  try { res.json(await service.retryAllHoldedSync(req.params.id)); }
+  catch (err: any) { res.status(500).json({ error: err.message }); }
 });
 
 // ── Download label PDF ───────────────────────────────────────────
